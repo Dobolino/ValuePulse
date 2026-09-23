@@ -80,3 +80,36 @@ def load_settings() -> Settings:
         odds_key=_clean_key(os.getenv("ODDS_API_KEY")),
         db_path=Path(db_override) if db_override else DB_PATH,
     )
+
+
+def save_env_keys(football_key: str, odds_key: str, path: Path | None = None) -> None:
+    """Schreibt die beiden Schlüssel in `.env` und in die laufende Umgebung.
+
+    Andere Zeilen in der Datei bleiben erhalten. Leere Felder schalten den
+    Demo-Modus wieder ein.
+    """
+    target = path or (ROOT / ".env")
+    updates = {
+        "FOOTBALL_DATA_API_KEY": football_key.strip(),
+        "ODDS_API_KEY": odds_key.strip(),
+    }
+    existing = target.read_text(encoding="utf-8").splitlines() if target.exists() else []
+    seen: set[str] = set()
+    lines: list[str] = []
+    for line in existing:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            lines.append(line)
+            continue
+        name = line.split("=", 1)[0].strip()
+        if name in updates:
+            lines.append(f"{name}={updates[name]}")
+            seen.add(name)
+        else:
+            lines.append(line)
+    for name, value in updates.items():
+        if name not in seen:
+            lines.append(f"{name}={value}")
+    target.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    os.environ["FOOTBALL_DATA_API_KEY"] = updates["FOOTBALL_DATA_API_KEY"]
+    os.environ["ODDS_API_KEY"] = updates["ODDS_API_KEY"]

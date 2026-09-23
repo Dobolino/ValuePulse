@@ -11,9 +11,9 @@ Das Dashboard läuft lokal im Browser. Fehlen API-Schlüssel oder ist ein Abruf-
 1. Öffne diesen Ordner.
 2. Doppelklicke auf **run.bat**.
 3. Beim ersten Start richtet das Programm alles selbst ein. Das kann ein bis zwei Minuten dauern.
-4. Das Dashboard öffnet sich im Browser: <http://localhost:8501>
+4. Das Dashboard öffnet sich im Browser, im dunklen Design: <http://localhost:8501>
 
-Das schwarze Fenster offen lassen, solange du ValuePulse benutzt.
+ValuePulse läuft danach im Hintergrund. Zum Beenden das minimierte Fenster „ValuePulse“ schließen.
 
 ### Mac
 
@@ -32,7 +32,7 @@ Dieselbe Anleitung steht im Dashboard im Reiter **Hilfe**.
 
 ## Echte Spiele statt Demo
 
-Ohne Schlüssel startet der Demo-Modus. Für echte Daten eine Datei `.env` anlegen (Vorlage: `.env.example`):
+Ohne Schlüssel startet der Demo-Modus. Schlüssel trägst du im Reiter **Einstellungen** ein und speicherst sie mit **Schlüssel lokal speichern**. Alternativ geht eine Datei `.env` (Vorlage: `.env.example`):
 
 ```
 FOOTBALL_DATA_API_KEY=dein_token
@@ -51,6 +51,10 @@ Jede abgerufene Quote landet in `valuepulse.sqlite3`. Quoten, die älter als 24 
 - Grün: Vorteil über 3 % und gute Daten. Beispiel: *Tipp: Heimsieg | Edge: 5,2 %*
 - Gelb: Vorteil rechnerisch da, Daten dünn oder Quote veraltet.
 - Rot/Grau: kein Vorteil gegenüber dem Buchmacher.
+
+Im Reiter **Datums-Filter** wählst du Start- und Enddatum. Gerechnet wird erst nach dem Button **Spiele suchen & berechnen**.
+
+Neue Dateien holst du mit **update.bat** oder `./update.sh`.
 
 ValuePulse ist eine Rechenhilfe, keine Wettberatung.
 

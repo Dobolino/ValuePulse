@@ -10,9 +10,9 @@ Ablauf:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
-from valuepulse.config import LEAGUES, LOOKAHEAD_DAYS, Settings, load_settings
+from valuepulse.config import LEAGUES, Settings, load_settings
 from valuepulse.db import connect, latest_quotes, load_standings, save_quotes, save_standings
 from valuepulse.demo import build_demo
 from valuepulse.model import assess, strength_from_table
@@ -27,17 +27,25 @@ from valuepulse.providers import (
     fetch_odds,
     fetch_standings,
 )
+from valuepulse.window import BERLIN, Window, resolve_window
 
 _SIGNAL_ORDER = {"green": 0, "yellow": 1, "red": 2}
 _MATCH_WINDOW_SECONDS = 6 * 3600
 
 
-def run(settings: Settings | None = None, client=None, now: datetime | None = None) -> DashboardData:
+def run(
+    settings: Settings | None = None,
+    client=None,
+    now: datetime | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> DashboardData:
     """Einstieg für das Dashboard. Wirft keine Fehler bis in die Oberfläche."""
     settings = settings or load_settings()
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
+    window = resolve_window(moment, date_from, date_to)
     http = client or default_client()
 
     if not settings.has_live_keys:
@@ -47,22 +55,22 @@ def run(settings: Settings | None = None, client=None, now: datetime | None = No
         if not settings.has_odds_key:
             missing.append("ODDS_API_KEY")
         reason = "Es fehlt: " + ", ".join(missing) + "."
-        return _safe_demo(moment, reason)
+        return _safe_demo(moment, reason, window)
 
     try:
         conn = connect(settings.db_path)
     except Exception as exc:
-        return _safe_demo(moment, f"Die lokale Datenbank ließ sich nicht öffnen ({exc}).")
+        return _safe_demo(moment, f"Die lokale Datenbank ließ sich nicht öffnen ({exc}).", window)
 
     try:
-        return _collect(settings, http, conn, moment)
+        return _collect(settings, http, conn, moment, window)
     except Exception as exc:
-        return _safe_demo(moment, f"Unerwarteter Fehler bei den Live-Daten ({exc}).")
+        return _safe_demo(moment, f"Unerwarteter Fehler bei den Live-Daten ({exc}).", window)
     finally:
         conn.close()
 
 
-def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
+def _collect(settings: Settings, client, conn, now: datetime, window: Window) -> DashboardData:
     warnings: list[str] = []
     fixtures: list[Fixture] = []
     standings: list[Standing] = []
@@ -74,7 +82,13 @@ def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
     for league in LEAGUES:
         try:
             fixtures.extend(
-                fetch_matches(client, settings.football_key, league, now=now, days=LOOKAHEAD_DAYS)
+                fetch_matches(
+                    client,
+                    settings.football_key,
+                    league,
+                    date_from=window.start_day.isoformat(),
+                    date_to=window.end_day.isoformat(),
+                )
             )
             standings.extend(fetch_standings(client, settings.football_key, league))
         except RateLimitError:
@@ -93,7 +107,12 @@ def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
     for league in LEAGUES:
         try:
             batch, remaining = fetch_odds(
-                client, settings.odds_key, league, now=now, days=LOOKAHEAD_DAYS
+                client,
+                settings.odds_key,
+                league,
+                window_start=_utc_start(window),
+                window_end=_utc_end(window),
+                fetched_at=now,
             )
             quotes.extend(batch)
             if remaining is not None:
@@ -122,7 +141,7 @@ def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
             return _safe_demo(now, reason)
 
     if not fixtures:
-        fixtures = _fixtures_from_quotes(quotes, now)
+        fixtures = _fixtures_from_quotes(quotes, window)
         if fixtures:
             warnings.append("Die Spielleiste kommt aus den Quoten, nicht aus Football-Data.")
         else:
@@ -136,7 +155,9 @@ def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
             warnings.append("Keine Tabelle vorhanden. Das Modell nutzt Neutralwerte.")
 
     api_limited = football_limited or odds_limited or used_cache
-    matches = _evaluate(fixtures, standings, quotes, now, api_limited=api_limited, is_demo=False)
+    matches = _evaluate(
+        fixtures, standings, quotes, now, window, api_limited=api_limited, is_demo=False
+    )
     if not matches:
         return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.")
 
@@ -163,9 +184,9 @@ def _collect(settings: Settings, client, conn, now: datetime) -> DashboardData:
     )
 
 
-def _safe_demo(now: datetime, reason: str) -> DashboardData:
+def _safe_demo(now: datetime, reason: str, window: Window) -> DashboardData:
     try:
-        return _from_demo(now, reason)
+        return _from_demo(now, reason, window)
     except Exception:
         return DashboardData(
             mode="demo",
@@ -178,9 +199,9 @@ def _safe_demo(now: datetime, reason: str) -> DashboardData:
         )
 
 
-def _from_demo(now: datetime, reason: str) -> DashboardData:
-    fixtures, table, quotes, banner = build_demo(now, reason)
-    matches = _evaluate(fixtures, table, quotes, now, api_limited=False, is_demo=True)
+def _from_demo(now: datetime, reason: str, window: Window) -> DashboardData:
+    fixtures, table, quotes, banner = build_demo(now, reason, window)
+    matches = _evaluate(fixtures, table, quotes, now, window, api_limited=False, is_demo=True)
     return DashboardData(
         mode="demo",
         banner=banner,
@@ -190,12 +211,11 @@ def _from_demo(now: datetime, reason: str) -> DashboardData:
     )
 
 
-def _fixtures_from_quotes(quotes: list[Quote], now: datetime) -> list[Fixture]:
+def _fixtures_from_quotes(quotes: list[Quote], window: Window) -> list[Fixture]:
     seen: set[tuple] = set()
     fixtures: list[Fixture] = []
-    horizon = now + timedelta(days=LOOKAHEAD_DAYS)
     for quote in quotes:
-        if quote.kickoff < now - timedelta(hours=3) or quote.kickoff > horizon:
+        if not window.contains(quote.kickoff):
             continue
         key = (quote.home, quote.away, quote.kickoff.replace(minute=0, second=0, microsecond=0))
         if key in seen:
@@ -219,14 +239,16 @@ def _evaluate(
     standings: list[Standing],
     quotes: list[Quote],
     now: datetime,
+    window: Window,
     *,
     api_limited: bool,
     is_demo: bool,
 ) -> list[MatchView]:
     views: list[MatchView] = []
-    horizon = now + timedelta(days=LOOKAHEAD_DAYS)
     for fixture in fixtures:
-        if fixture.kickoff < now - timedelta(hours=3) or fixture.kickoff > horizon:
+        if not window.contains(fixture.kickoff):
+            continue
+        if not is_demo and fixture.kickoff < now - timedelta(hours=3):
             continue
         table = _table_for(fixture, standings)
         attached = _attach_quotes(fixture, quotes)
@@ -307,6 +329,14 @@ def _swap_quote(quote: Quote) -> Quote:
         last_update=quote.last_update,
         source=quote.source,
     )
+
+
+def _utc_start(window: Window) -> datetime:
+    return datetime.combine(window.start_day, time.min, tzinfo=BERLIN).astimezone(timezone.utc)
+
+
+def _utc_end(window: Window) -> datetime:
+    return datetime.combine(window.end_day, time.max, tzinfo=BERLIN).astimezone(timezone.utc)
 
 
 def _kickoff_label(moment: datetime) -> str:

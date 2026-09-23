@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from valuepulse.model import strength_from_table
 from valuepulse.models import Fixture, Quote, Standing
+from valuepulse.window import BERLIN, Window
 
 DEMO_CODE = "DEMO"
 DEMO_NAME = "Demo-Liga"
@@ -36,21 +37,21 @@ def demo_table() -> list[Standing]:
     ]
 
 
-def build_demo(now: datetime, reason: str) -> tuple[list[Fixture], list[Standing], list[Quote], str]:
-    """Vier Spiele: zwei mit klarem Edge, zwei fair bepreist."""
+def build_demo(now: datetime, reason: str, window: Window) -> tuple[list[Fixture], list[Standing], list[Quote], str]:
+    """Vier Spiele im gewählten Zeitraum: zwei mit klarem Edge, zwei fair bepreist."""
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     table = demo_table()
     pairs = (
-        ("Nordstern", "Westbrück", 1, "value-home"),
-        ("Südwall", "Ostheim", 2, "fair"),
-        ("Westbrück", "Nordstern", 3, "value-away"),
-        ("Ostheim", "Südwall", 4, "fair"),
+        ("Nordstern", "Westbrück", "value-home"),
+        ("Südwall", "Ostheim", "fair"),
+        ("Westbrück", "Nordstern", "value-away"),
+        ("Ostheim", "Südwall", "fair"),
     )
+    kickoffs = _spread(window, len(pairs))
     fixtures: list[Fixture] = []
     quotes: list[Quote] = []
-    for home, away, offset, kind in pairs:
-        kickoff = (now + timedelta(days=offset)).replace(minute=30, second=0, microsecond=0)
+    for index, ((home, away, kind), kickoff) in enumerate(zip(pairs, kickoffs, strict=True), start=1):
         fixtures.append(
             Fixture(
                 competition=DEMO_NAME,
@@ -58,7 +59,7 @@ def build_demo(now: datetime, reason: str) -> tuple[list[Fixture], list[Standing
                 kickoff=kickoff,
                 home=home,
                 away=away,
-                match_id=f"demo-{offset}",
+                match_id=f"demo-{index}",
             )
         )
         model = strength_from_table(home, away, table)
@@ -70,6 +71,23 @@ def build_demo(now: datetime, reason: str) -> tuple[list[Fixture], list[Standing
         "Ein Value in den Beispielen bleibt gelb."
     )
     return fixtures, table, quotes, banner
+
+
+def _spread(window: Window, count: int) -> list[datetime]:
+    """Verteilt Beispiel-Anpfiffe auf die gewählten Kalendertage."""
+    span_days = (window.end_day - window.start_day).days
+    moments: list[datetime] = []
+    for index in range(count):
+        if span_days == 0:
+            day = window.start_day
+        else:
+            step = round(span_days * (index + 1) / (count + 1))
+            day = window.start_day + timedelta(days=step)
+            if day > window.end_day:
+                day = window.end_day
+        local = datetime(day.year, day.month, day.day, 15 + index, 30, tzinfo=BERLIN)
+        moments.append(local.astimezone(timezone.utc))
+    return moments
 
 
 def _books(

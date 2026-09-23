@@ -7,7 +7,7 @@ dann über Speicher oder Demo-Modus.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import requests
@@ -88,11 +88,9 @@ def fetch_matches(
     api_key: str,
     league: dict,
     *,
-    now: datetime,
-    days: int,
+    date_from: str,
+    date_to: str,
 ) -> list[Fixture]:
-    date_from = now.date().isoformat()
-    date_to = (now + timedelta(days=days)).date().isoformat()
     payload, _headers = _request_json(
         client,
         f"{FOOTBALL_DATA_BASE}/competitions/{league['code']}/matches",
@@ -164,8 +162,9 @@ def fetch_odds(
     api_key: str,
     league: dict,
     *,
-    now: datetime,
-    days: int,
+    window_start: datetime,
+    window_end: datetime,
+    fetched_at: datetime,
 ) -> tuple[list[Quote], int | None]:
     payload, headers = _request_json(
         client,
@@ -184,7 +183,6 @@ def fetch_odds(
         raise ProviderError("Die Quoten-API lieferte ein unerwartetes Format.")
 
     quotes: list[Quote] = []
-    horizon = now + timedelta(days=days)
     for event in payload:
         if not isinstance(event, dict):
             continue
@@ -193,10 +191,10 @@ def fetch_odds(
         away = event.get("away_team")
         if kickoff is None or not home or not away:
             continue
-        if kickoff < now - timedelta(hours=3) or kickoff > horizon:
+        if kickoff < window_start or kickoff > window_end:
             continue
         for book in event.get("bookmakers") or []:
-            quote = _quote_from_book(book, league["name"], kickoff, str(home), str(away), now)
+            quote = _quote_from_book(book, league["name"], kickoff, str(home), str(away), fetched_at)
             if quote is not None:
                 quotes.append(quote)
     return quotes, remaining
@@ -276,3 +274,46 @@ def _slot(name: str, home: str, away: str) -> str | None:
 
 def league_by_code() -> dict[str, dict]:
     return {league["code"]: league for league in LEAGUES}
+
+
+def check_api_keys(football_key: str, odds_key: str, client: HttpClient | None = None) -> dict[str, str]:
+    """Prüft die Schlüssel mit je einem kleinen Abruf. Speichert nichts."""
+    http = client or default_client()
+    return {
+        "football": _check_one(football_key, lambda key: _ping_football(http, key)),
+        "odds": _check_one(odds_key, lambda key: _ping_odds(http, key)),
+    }
+
+
+def _check_one(key: str, call) -> str:
+    if not key.strip():
+        return "fehlt"
+    try:
+        call(key.strip())
+    except AuthError:
+        return "abgelehnt"
+    except RateLimitError:
+        return "limit"
+    except ProviderError as exc:
+        if exc.status == 403:
+            return "abgelehnt"
+        return "nicht erreichbar"
+    return "gültig"
+
+
+def _ping_football(client: HttpClient, key: str) -> None:
+    _request_json(
+        client,
+        f"{FOOTBALL_DATA_BASE}/competitions/PL",
+        headers={"X-Auth-Token": key},
+        params={},
+    )
+
+
+def _ping_odds(client: HttpClient, key: str) -> None:
+    _request_json(
+        client,
+        f"{ODDS_API_BASE}/sports",
+        headers={},
+        params={"apiKey": key},
+    )

@@ -1,5 +1,5 @@
 @echo off
-REM Startet ValuePulse per Doppelklick unter Windows.
+REM Startet ValuePulse im Hintergrund und oeffnet das dunkle Dashboard.
 cd /d "%~dp0"
 set STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
@@ -45,6 +45,17 @@ if not exist ".env" if exist ".env.example" (
   echo Hinweis: .env wurde angelegt. Ohne API-Schluessel startet der Demo-Modus.
 )
 
-echo ValuePulse oeffnet sich im Browser. Dieses Fenster offen lassen.
-".venv\Scripts\python.exe" -m streamlit run valuepulse/app.py --server.port 8501
-pause
+".venv\Scripts\python.exe" -c "import socket; socket.create_connection(('127.0.0.1',8501),1)" >nul 2>&1
+if not errorlevel 1 (
+  start "" http://localhost:8501
+  echo ValuePulse laeuft bereits. Das Dashboard oeffnet sich im Darkmode.
+  exit /b 0
+)
+
+start "ValuePulse" /MIN ".venv\Scripts\python.exe" -m streamlit run valuepulse/app.py --server.port 8501 --server.headless true --theme.base dark --browser.gatherUsageStats false
+echo Warte auf den Start ...
+timeout /t 4 /nobreak >nul
+start "" http://localhost:8501
+echo ValuePulse laeuft im Hintergrund. Das Dashboard oeffnet sich im Darkmode.
+echo Zum Beenden das minimierte Fenster ValuePulse schliessen.
+exit /b 0
