@@ -48,6 +48,10 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
   **Schlüssel lokal speichern** sichern. Dort steht auch, ob der Demo-Modus aktiv ist
   und ob die Schlüssel gültig sind.
 - **Pro-Version:** Poisson-Matrix, Buchmacher-Marge, Shin- und Power-Methode, Edge und Kelly-Anteil.
+- **Tippschein:** baut aus den Value-Signalen einen Schein mit 2 bis 10 Spielen.
+  Wenig Risiko nimmt hohe Trefferchancen, Mittel mischt Edge und Chance,
+  Hoch nimmt den größten Edge. Fehlen Spiele, erscheint eine gelbe Warnung
+  **Spielschein gekürzt**.
 - **Hilfe:** diese Anleitung.
 
 ## API-Schlüssel (nur für echte Spiele)

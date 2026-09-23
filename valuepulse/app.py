@@ -19,6 +19,7 @@ from valuepulse.models import DashboardData, MatchView
 from valuepulse.pipeline import run
 from valuepulse.pro import build_pro_view
 from valuepulse.providers import check_api_keys
+from valuepulse.slip import STAKE_CAP, Slip, build_slip
 
 st.set_page_config(
     page_title="ValuePulse",
@@ -121,6 +122,16 @@ _CSS = """
     .vp-meta { margin-top: 0.55rem; color: #c5d2e0; font-size: 0.95rem; line-height: 1.55; }
     .vp-foot { color: #9aabbc; font-size: 0.92rem; line-height: 1.5; margin-top: 1.3rem; }
     .vp-matrix td, .vp-matrix th { text-align: center; padding: 0.55rem 0.4rem; }
+    .vp-slip-warn {
+        background: #3d320f;
+        color: #ffd56a;
+        border: 1px solid #c9a227;
+        border-radius: 12px;
+        padding: 0.95rem 1.05rem;
+        line-height: 1.55;
+        margin: 0.2rem 0 1rem;
+    }
+    .vp-slip-warn strong { color: #ffe7a3; display: block; margin-bottom: 0.25rem; }
 </style>
 """
 
@@ -173,12 +184,13 @@ def main() -> None:
     st.title("ValuePulse")
     st.caption("Modell gegen Buchmacher. Ein Value-Signal beginnt bei einem Edge über 3 %.")
 
-    dashboard, calendar, settings, pro, help_tab = st.tabs(
+    dashboard, calendar, settings, pro, slip_tab, help_tab = st.tabs(
         [
             "📊 Dashboard (Live & Signale)",
             "🗓️ Datums-Filter (Kalender)",
             "⚙️ Einstellungen (API-Keys)",
             "💎 Pro-Version (Erweiterte Metriken)",
+            "🎟️ Tippschein",
             "❓ Hilfe & Anleitung",
         ]
     )
@@ -191,6 +203,8 @@ def main() -> None:
         _render_settings()
     with pro:
         _render_pro(data)
+    with slip_tab:
+        _render_slip(data)
     with help_tab:
         st.markdown(HELP_MARKDOWN)
 
@@ -321,6 +335,109 @@ def _render_settings() -> None:
                 "Die Schlüssel wurden gespeichert. Die Prüfung war gerade nicht möglich."
             )
         st.rerun()
+
+
+def _render_slip(data: DashboardData) -> None:
+    st.subheader("Tippschein-Generator")
+    st.markdown(
+        '<p class="vp-note">Aus den Value-Signalen mit mehr als 3 % Edge wird ein Schein gebaut. '
+        "Dieselbe Mannschaft kommt nur einmal vor. Der Button rechnet den Schein, "
+        "die Regler allein noch nicht.</p>",
+        unsafe_allow_html=True,
+    )
+    count_col, risk_col = st.columns([1, 2])
+    with count_col:
+        count = st.selectbox("Anzahl der Spiele", list(range(2, 11)), index=1)
+    with risk_col:
+        risk_choice = st.radio(
+            "Risikostufe",
+            [
+                "🛡️ Wenig Risiko",
+                "⚖️ Mittel (Standard)",
+                "🚀 Hoch (Risiko)",
+            ],
+            index=1,
+        )
+    risk = {
+        "🛡️ Wenig Risiko": "wenig",
+        "⚖️ Mittel (Standard)": "mittel",
+        "🚀 Hoch (Risiko)": "hoch",
+    }[risk_choice]
+    st.caption(
+        "Wenig Risiko: Trefferchance ab 55 % und Datenqualität ab 60. "
+        "Mittel: bestes Produkt aus Edge und Trefferchance. "
+        "Hoch: größter Edge, auch bei hoher Quote. "
+        f"Der Gesamteinsatz ist ein Viertel-Kelly und höchstens {pct(STAKE_CAP[risk], 1)} der Bankroll."
+    )
+    fingerprint = tuple(
+        (
+            match.competition,
+            match.home,
+            match.away,
+            match.kickoff.isoformat(),
+            match.assessment.pick,
+            round(match.assessment.edge, 5),
+            match.assessment.quality,
+        )
+        for match in data.matches
+    )
+    if st.button("Tippschein generieren", type="primary"):
+        st.session_state.slip_result = build_slip(data.matches, count=int(count), risk=risk)
+        st.session_state.slip_fingerprint = fingerprint
+    slip = st.session_state.get("slip_result")
+    if not isinstance(slip, Slip):
+        st.info("Noch kein Schein. Anzahl und Risiko einstellen, dann auf Tippschein generieren.")
+        return
+    if st.session_state.get("slip_fingerprint") != fingerprint:
+        st.info("Die berechneten Spiele haben sich geändert. Bitte den Tippschein neu generieren.")
+        return
+    if slip.requested != int(count) or slip.risk != risk:
+        st.caption("Die Einstellung oben ist noch nicht im Schein. Dafür erneut auf Tippschein generieren.")
+    _show_slip(slip)
+
+
+def _show_slip(slip: Slip) -> None:
+    if slip.warning:
+        title, _, body = slip.warning.partition("\n")
+        st.markdown(
+            f'<div class="vp-slip-warn"><strong>⚠️ {html.escape(title)}</strong>'
+            f"{html.escape(body)}</div>",
+            unsafe_allow_html=True,
+        )
+    if not slip.legs:
+        st.info("Für diese Risikostufe liegt gerade kein qualifiziertes Spiel vor.")
+        st.text_area("Schein zum Kopieren", value=slip.copy_text, height=140, key=_copy_key(slip))
+        return
+    rows = [
+        {
+            "Liga": leg.competition,
+            "Paarung": f"{leg.home} – {leg.away}",
+            "Tipp": leg.pick_label,
+            "Einzelquote": decimal_de(leg.odds),
+            "Modell": pct(leg.probability, 1),
+        }
+        for leg in slip.legs
+    ]
+    st.markdown(_html_table(pd.DataFrame(rows)), unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Gesamtquote", decimal_de(slip.combined_odds or 0.0))
+    c2.metric("Gesamt-Wahrscheinlichkeit", pct(slip.combined_probability or 0.0))
+    c3.metric("Empfohlener Gesamteinsatz", pct(slip.stake))
+    cap_note = (
+        f" Der Viertel-Kelly läge höher und ist auf {pct(slip.stake_cap, 1)} gedeckelt."
+        if slip.stake_capped
+        else ""
+    )
+    st.caption(
+        f"{slip.risk_label}: {len(slip.legs)} von {slip.requested} Spielen. "
+        "Gesamtquote und Gesamt-Wahrscheinlichkeit sind das Produkt der Einzelwerte."
+        f"{cap_note} Keine Wettberatung."
+    )
+    st.text_area("Schein zum Kopieren", value=slip.copy_text, height=220, key=_copy_key(slip))
+
+
+def _copy_key(slip: Slip) -> str:
+    return "slip-copy-" + str(abs(hash(slip.copy_text)))
 
 
 def _render_pro(data: DashboardData) -> None:
