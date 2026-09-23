@@ -16,6 +16,7 @@ Ohne Programmieren, ohne Einrichtung im Terminal.
 2. Doppelklicke auf **run.bat**.
 3. Beim ersten Start richtet das Programm Python und die nötigen Bausteine selbst ein.
    Das kann ein bis zwei Minuten dauern.
+   Python 3.11 oder neuer ist richtig. Python 3.13 ist passend.
 4. Danach öffnet sich das Dashboard im Browser, dunkel hinterlegt.
    Falls nicht, öffne selbst diese Adresse: [http://localhost:8501](http://localhost:8501)
 
@@ -84,6 +85,9 @@ Beispiel: *Modell sieht Heimsieg bei 60 %, Quote entspricht 52 % → 8,0 % Edge.
 Neue Programmdateien holst du mit einem Doppelklick auf **update.bat** (Windows)
 oder im Terminal mit `./update.sh` (Mac und Linux).
 Dabei wird immer die Hauptversion **main** geholt.
+Ein als ZIP gespeicherter Ordner ohne Git funktioniert trotzdem:
+die Dateien werden direkt geladen. Die Schlüssel in `.env` und die Datei
+`valuepulse.sqlite3` bleiben erhalten.
 Wenn es geklappt hat, steht dort: *ValuePulse wurde erfolgreich aktualisiert!*
 
 ## Wenn etwas hakt
