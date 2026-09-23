@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+valuepulse.sqlite3
+valuepulse.sqlite3.bak
+*.log
+.streamlit/secrets.toml
