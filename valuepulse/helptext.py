@@ -94,10 +94,12 @@ Wenn es geklappt hat, steht dort: *ValuePulse wurde erfolgreich aktualisiert!*
   Liegt nichts Speicherbares vor, erscheint der Demo-Modus.
 - **Quote älter als 24 Stunden:** Das Spiel wird trotzdem bewertet.
   Die Datenqualität sinkt, ein Value-Signal bleibt deshalb gelb.
-- **Fenster schließt sich sofort:** Python ist nicht installiert oder nicht im PATH.
-  Installiere Python 3.11 oder neuer von [python.org](https://www.python.org/downloads/)
-  und starte die Datei erneut. Unter Windows beim Installieren
-  „Add python.exe to PATH“ ankreuzen.
+- **„Python wurde nicht gefunden“ und der Microsoft Store:** Windows hat kein echtes
+  Python, nur eine Verknüpfung. Installiere Python 3.11 oder neuer von
+  [python.org](https://www.python.org/downloads/) und kreuze dabei
+  „Add python.exe to PATH“ an. Stelle danach unter
+  Einstellungen → Apps → Erweiterte App-Einstellungen → App-Ausführungsaliase
+  die Einträge `python.exe` und `python3.exe` auf Aus. Dann `run.bat` erneut starten.
 
 ## Wichtig
 

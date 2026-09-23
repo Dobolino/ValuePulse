@@ -44,15 +44,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
-where python >nul 2>&1
+call "%~dp0findpython.bat"
 if errorlevel 1 (
-  echo Python fehlt. Die Aktualisierung ist fehlgeschlagen.
+  echo Die Dateien von main sind geholt. Python muss noch installiert werden, danach run.bat starten.
   pause
   exit /b 1
 )
 
+if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
+
 if not exist ".venv\Scripts\python.exe" (
-  python -m venv .venv
+  "%VP_PYTHON%" -m venv .venv
   if errorlevel 1 (
     echo Die Aktualisierung ist fehlgeschlagen.
     pause

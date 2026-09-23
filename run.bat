@@ -3,24 +3,20 @@ REM Startet ValuePulse im Hintergrund und oeffnet das dunkle Dashboard.
 cd /d "%~dp0"
 set STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
-where python >nul 2>&1
+call "%~dp0findpython.bat"
 if errorlevel 1 (
-  echo.
-  echo Python fehlt.
-  echo Bitte installiere Python 3.11 oder neuer:
-  echo https://www.python.org/downloads/
-  echo Beim Installieren "Add python.exe to PATH" ankreuzen.
-  echo Danach diese Datei erneut starten.
-  echo.
   pause
   exit /b 1
 )
 
+if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
+
 if not exist ".venv\Scripts\python.exe" (
   echo Einrichtung beim ersten Start ...
-  python -m venv .venv
+  "%VP_PYTHON%" -m venv .venv
   if errorlevel 1 (
     echo Die Einrichtung ist fehlgeschlagen.
+    echo Benutzt wurde: %VP_PYTHON%
     pause
     exit /b 1
   )
