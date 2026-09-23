@@ -54,7 +54,7 @@ Jede abgerufene Quote landet in `valuepulse.sqlite3`. Quoten, die älter als 24 
 
 Im Reiter **Datums-Filter** wählst du Start- und Enddatum. Gerechnet wird erst nach dem Button **Spiele suchen & berechnen**.
 
-Neue Dateien holst du mit **update.bat** oder `./update.sh`.
+Neue Dateien holst du mit **update.bat** oder `./update.sh`. Dabei wird die Hauptversion **main** geholt.
 
 ValuePulse ist eine Rechenhilfe, keine Wettberatung.
 

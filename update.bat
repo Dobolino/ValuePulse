@@ -2,24 +2,46 @@
 REM Holt neue Dateien und aktualisiert die Python-Bausteine.
 cd /d "%~dp0"
 echo ValuePulse wird aktualisiert ...
+echo Geholt wird die Hauptversion main.
 
 where git >nul 2>&1
-if not errorlevel 1 (
-  git rev-parse --is-inside-work-tree >nul 2>&1
-  if not errorlevel 1 (
-    git fetch origin >nul 2>&1
-    if errorlevel 1 (
-      echo Hinweis: Der Abgleich mit dem Server war gerade nicht moeglich.
-    ) else (
-      git status -sb | find "behind" >nul
-      if not errorlevel 1 (
-        git pull --ff-only
-        if errorlevel 1 echo Hinweis: Neue Dateien konnten nicht automatisch uebernommen werden.
-      ) else (
-        echo Keine neuen Dateien auf dem Server.
-      )
-    )
-  )
+if errorlevel 1 (
+  echo Git fehlt. Die Version von main kann so nicht geholt werden.
+  pause
+  exit /b 1
+)
+
+git rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+  echo Dieser Ordner ist kein Git-Projekt. Die Version von main kann so nicht geholt werden.
+  pause
+  exit /b 1
+)
+
+git fetch origin main
+if errorlevel 1 (
+  echo Die Hauptversion main konnte nicht vom Server geholt werden.
+  pause
+  exit /b 1
+)
+
+git show-ref --verify --quiet refs/heads/main
+if errorlevel 1 (
+  git checkout -b main --track origin/main
+) else (
+  git checkout main
+)
+if errorlevel 1 (
+  echo Wechsel auf main ist fehlgeschlagen. Bitte ValuePulse schliessen und es erneut versuchen.
+  pause
+  exit /b 1
+)
+
+git pull --ff-only origin main
+if errorlevel 1 (
+  echo main konnte nicht uebernommen werden.
+  pause
+  exit /b 1
 )
 
 where python >nul 2>&1

@@ -83,6 +83,7 @@ Beispiel: *Modell sieht Heimsieg bei 60 %, Quote entspricht 52 % → 8,0 % Edge.
 
 Neue Programmdateien holst du mit einem Doppelklick auf **update.bat** (Windows)
 oder im Terminal mit `./update.sh` (Mac und Linux).
+Dabei wird immer die Hauptversion **main** geholt.
 Wenn es geklappt hat, steht dort: *ValuePulse wurde erfolgreich aktualisiert!*
 
 ## Wenn etwas hakt

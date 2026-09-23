@@ -4,19 +4,33 @@ set -u
 cd "$(dirname "$0")"
 
 echo "ValuePulse wird aktualisiert …"
+echo "Geholt wird die Hauptversion main."
 
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  if git fetch origin >/dev/null 2>&1; then
-    if git status -sb | grep -q "behind"; then
-      git pull --ff-only || echo "Hinweis: Neue Dateien konnten nicht automatisch übernommen werden."
-    else
-      echo "Keine neuen Dateien auf dem Server."
-    fi
-  else
-    echo "Hinweis: Der Abgleich mit dem Server war gerade nicht möglich."
-  fi
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Dieser Ordner ist kein Git-Projekt. Die Version von main kann so nicht geholt werden."
+  exit 1
+fi
+
+if ! git fetch origin main; then
+  echo "Die Hauptversion main konnte nicht vom Server geholt werden."
+  exit 1
+fi
+
+if git show-ref --verify --quiet refs/heads/main; then
+  git checkout main || {
+    echo "Wechsel auf main ist fehlgeschlagen. Bitte ValuePulse schließen und es erneut versuchen."
+    exit 1
+  }
 else
-  echo "Kein Versionsstand zum Abgleichen. Es werden die Python-Bausteine aktualisiert."
+  git checkout -b main --track origin/main || {
+    echo "Die Hauptversion main ließ sich nicht öffnen."
+    exit 1
+  }
+fi
+
+if ! git pull --ff-only origin main; then
+  echo "main konnte nicht übernommen werden."
+  exit 1
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
