@@ -7,12 +7,13 @@ einer anderen Programmversion, legt ValuePulse sie beiseite und beginnt neu.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from valuepulse.models import Quote, Standing
 
 SCHEMA_VERSION = "1"
+SNAPSHOT_KEEP_DAYS = 90
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -70,10 +71,8 @@ def connect(path: Path) -> sqlite3.Connection:
     try:
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("PRAGMA integrity_check").fetchone()
-        if row is None or row[0] != "ok":
-            raise sqlite3.DatabaseError("integrity_check failed")
         _ensure_schema(conn)
+        delete_old_snapshots(conn)
         return conn
     except sqlite3.DatabaseError:
         try:
@@ -84,6 +83,7 @@ def connect(path: Path) -> sqlite3.Connection:
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
         _ensure_schema(conn)
+        delete_old_snapshots(conn)
         return conn
 
 
@@ -214,6 +214,17 @@ def load_standings(conn: sqlite3.Connection) -> list[Standing]:
         )
         for row in rows
     ]
+
+
+def delete_old_snapshots(conn: sqlite3.Connection, *, now: datetime | None = None, keep_days: int = SNAPSHOT_KEEP_DAYS) -> int:
+    """Löscht gespeicherte Quoten, die älter als 90 Tage sind."""
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    cutoff = (moment - timedelta(days=keep_days)).replace(microsecond=0).isoformat()
+    cursor = conn.execute("DELETE FROM odds_snapshots WHERE fetched_at < ?", (cutoff,))
+    conn.commit()
+    return cursor.rowcount
 
 
 def _parse_dt(value: str) -> datetime:

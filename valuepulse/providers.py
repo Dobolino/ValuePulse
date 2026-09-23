@@ -172,7 +172,7 @@ def fetch_odds(
         headers={},
         params={
             "apiKey": api_key,
-            "regions": "eu,uk",
+            "regions": "eu",
             "markets": "h2h",
             "oddsFormat": "decimal",
             "dateFormat": "iso",

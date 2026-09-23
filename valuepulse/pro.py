@@ -13,6 +13,7 @@ from valuepulse.models import Assessment
 
 _OUTCOMES = ("home", "draw", "away")
 MATRIX_SIZE = 6
+KELLY_SCALE = 0.25
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class ProView:
     shin: dict[str, float]
     power: dict[str, float]
     kelly: dict[str, float]
+    recommended_stake: dict[str, float]
     edge_raw: dict[str, float]
     edge_shin: dict[str, float]
     matrix: list[list[float]]
@@ -29,7 +31,7 @@ class ProView:
 
 def bookmaker_margin(odds: list[float]) -> float:
     """Überrundung: Summe der rohen Quotenwahrscheinlichkeiten minus 1."""
-    return sum(1.0 / price for price in odds) - 1.0
+    return sum(1.0 / decimal_odd for decimal_odd in odds) - 1.0
 
 
 def kelly_fraction(probability: float, decimal_odds: float) -> float:
@@ -41,13 +43,18 @@ def kelly_fraction(probability: float, decimal_odds: float) -> float:
     return max(0.0, fraction)
 
 
+def fractional_kelly(probability: float, decimal_odds: float, scale: float = KELLY_SCALE) -> float:
+    """Viertel-Kelly als empfohlener Höchsteinsatz. Der volle Kelly bleibt die Rechenbasis."""
+    return kelly_fraction(probability, decimal_odds) * scale
+
+
 def shin_probabilities(odds: list[float]) -> dict[str, float]:
     """Shin-Methode: faire Wahrscheinlichkeiten nach Abzug der Marge.
 
     z ist der Anteil informierter Einsätze. Er wird so gewählt, dass die
     fairen Wahrscheinlichkeiten zusammen 100 % ergeben.
     """
-    implied = [1.0 / price for price in odds]
+    implied = [1.0 / decimal_odd for decimal_odd in odds]
     total = sum(implied)
     if total <= 1.0000001:
         fair = [value / total for value in implied]
@@ -56,8 +63,8 @@ def shin_probabilities(odds: list[float]) -> dict[str, float]:
     def at(insider: float) -> list[float]:
         insider = min(0.999, max(1e-8, insider))
         values = []
-        for price in implied:
-            root = math.sqrt(insider**2 + 4 * (1 - insider) * price**2 / total)
+        for probability in implied:
+            root = math.sqrt(insider**2 + 4 * (1 - insider) * probability**2 / total)
             values.append((root - insider) / (2 * (1 - insider)))
         return values
 
@@ -75,13 +82,13 @@ def shin_probabilities(odds: list[float]) -> dict[str, float]:
 
 def power_probabilities(odds: list[float]) -> dict[str, float]:
     """Power-Methode: Exponent so wählen, dass die Quotenwahrscheinlichkeiten 100 % ergeben."""
-    implied = [1.0 / price for price in odds]
+    implied = [1.0 / decimal_odd for decimal_odd in odds]
     total = sum(implied)
     if abs(total - 1.0) <= 1e-9:
         return dict(zip(_OUTCOMES, implied, strict=True))
 
     def total_at(exponent: float) -> float:
-        return sum(price**exponent for price in implied)
+        return sum(probability**exponent for probability in implied)
 
     low, high = 0.05, 8.0
     for _ in range(60):
@@ -91,7 +98,7 @@ def power_probabilities(odds: list[float]) -> dict[str, float]:
         else:
             high = mid
     exponent = (low + high) / 2
-    solved = [price**exponent for price in implied]
+    solved = [probability**exponent for probability in implied]
     scale = sum(solved) or 1.0
     return dict(zip(_OUTCOMES, [value / scale for value in solved], strict=True))
 
@@ -118,6 +125,7 @@ def build_pro_view(item: Assessment) -> ProView:
     edge_raw = {key: item.model_probs[key] - (1.0 / item.odds[key]) for key in _OUTCOMES}
     edge_shin = {key: item.model_probs[key] - shin[key] for key in _OUTCOMES}
     kelly = {key: kelly_fraction(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
+    recommended = {key: fractional_kelly(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
     if item.home_xg is None or item.away_xg is None:
         matrix, mass = [], 0.0
     else:
@@ -127,6 +135,7 @@ def build_pro_view(item: Assessment) -> ProView:
         shin=shin,
         power=power,
         kelly=kelly,
+        recommended_stake=recommended,
         edge_raw=edge_raw,
         edge_shin=edge_shin,
         matrix=matrix,

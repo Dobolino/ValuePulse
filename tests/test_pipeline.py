@@ -20,16 +20,22 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, by_status=None, payload=None):
+    def __init__(self, by_status=None, payload=None, matches=None, odds=None):
         self.by_status = by_status
         self.payload = payload
+        self.matches = matches
+        self.odds = odds
         self.calls = 0
+        self.params = []
 
     def get(self, url, *, headers, params, timeout):
         self.calls += 1
+        self.params.append(params)
         if self.by_status is not None:
             return FakeResponse({"message": "limit"}, status=self.by_status)
         if "/matches" in url:
+            if self.matches is not None:
+                return FakeResponse({"matches": self.matches})
             return FakeResponse(
                 {
                     "matches": [
@@ -60,7 +66,8 @@ class FakeClient:
                 }
             )
         if "/odds" in url:
-            return FakeResponse(_odds_payload(), headers={"x-requests-remaining": "412"})
+            payload = self.odds if self.odds is not None else _odds_payload()
+            return FakeResponse(payload, headers={"x-requests-remaining": "412"})
         raise AssertionError(url)
 
 
@@ -128,6 +135,7 @@ def test_live_speichert_quoten_und_findet_value(tmp_path):
     assert home.assessment.signal == "green"
     assert "Modell sieht" in home.assessment.explanation
     assert client.calls > 0
+    assert any(params.get("regions") == "eu" for params in client.params)
 
 
 def test_http_429_ohne_speicher_wird_demo(tmp_path):
@@ -149,6 +157,92 @@ def test_http_429_nutzt_gespeicherte_quoten(tmp_path):
     assert second.matches
     assert any("gespeicherte" in note.lower() or "API-Limit" in note for match in second.matches for note in match.assessment.quality_notes)
     assert all(match.assessment.quality <= 70 for match in second.matches)
+
+
+def _assert_demo_fallback(data, reason_part: str) -> None:
+    assert data.mode == "demo"
+    assert data.matches
+    assert reason_part in data.banner
+    assert "TypeError" not in data.banner
+    assert "Unerwarteter Fehler" not in data.banner
+
+
+def test_ohne_quoten_faellt_auf_demo_zurueck(tmp_path):
+    data = run(
+        Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"),
+        client=FakeClient(odds=[]),
+        now=NOW,
+    )
+    _assert_demo_fallback(data, "Es lagen keine Quoten vor.")
+
+
+def test_ohne_spiele_im_zeitfenster_faellt_auf_demo_zurueck(tmp_path):
+    from valuepulse.db import connect, save_quotes
+    from valuepulse.models import Quote
+
+    path = tmp_path / "valuepulse.sqlite3"
+    conn = connect(path)
+    stored_at = datetime.now(timezone.utc) - timedelta(days=10)
+    save_quotes(
+        conn,
+        [
+            Quote(
+                competition="Premier League",
+                kickoff=datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc),
+                home="Arsenal",
+                away="Chelsea",
+                bookmaker="Alt",
+                home_odds=2.0,
+                draw_odds=3.4,
+                away_odds=3.8,
+                last_update=stored_at,
+                source="the-odds-api",
+            )
+        ],
+        stored_at,
+    )
+    conn.close()
+    data = run(
+        Settings("fd-key", "odds-key", path),
+        client=FakeClient(matches=[], odds=[]),
+        now=NOW,
+    )
+    _assert_demo_fallback(data, "Zeitfenster")
+
+
+def test_ohne_zuordnung_faellt_auf_demo_zurueck(tmp_path):
+    other = (NOW + timedelta(days=3)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    odds = [
+        {
+            "id": "other",
+            "commence_time": other,
+            "home_team": "Bayern Munich",
+            "away_team": "Borussia Dortmund",
+            "bookmakers": [
+                {
+                    "key": "book",
+                    "title": "Buch",
+                    "last_update": NOW.isoformat().replace("+00:00", "Z"),
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": "Bayern Munich", "price": 1.7},
+                                {"name": "Draw", "price": 3.8},
+                                {"name": "Borussia Dortmund", "price": 4.6},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    data = run(
+        Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"),
+        client=FakeClient(odds=odds),
+        now=NOW,
+    )
+    _assert_demo_fallback(data, "keinem gemeinsamen Spiel")
 
 
 def test_ligen_sind_die_grossen_fuenf():

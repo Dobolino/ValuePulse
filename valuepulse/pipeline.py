@@ -138,14 +138,14 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             warnings.append("Keine frischen Quoten. Gespeicherte Quoten werden verwendet.")
         else:
             reason = " ".join(warnings) or "Es lagen keine Quoten vor."
-            return _safe_demo(now, reason)
+            return _safe_demo(now, reason, window)
 
     if not fixtures:
         fixtures = _fixtures_from_quotes(quotes, window)
         if fixtures:
             warnings.append("Die Spielleiste kommt aus den Quoten, nicht aus Football-Data.")
         else:
-            return _safe_demo(now, "Weder Live-Spiele noch gespeicherte Quoten im Zeitfenster.")
+            return _safe_demo(now, "Weder Live-Spiele noch gespeicherte Quoten im Zeitfenster.", window)
 
     if not standings:
         standings = load_standings(conn)
@@ -159,7 +159,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
         fixtures, standings, quotes, now, window, api_limited=api_limited, is_demo=False
     )
     if not matches:
-        return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.")
+        return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.", window)
 
     if used_cache or football_limited or odds_limited:
         mode = "cache"

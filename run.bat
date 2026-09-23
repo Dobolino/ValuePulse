@@ -50,8 +50,19 @@ if not errorlevel 1 (
 
 start "ValuePulse" /MIN ".venv\Scripts\python.exe" -m streamlit run valuepulse/app.py --server.port 8501 --server.headless true --theme.base dark --browser.gatherUsageStats false
 echo Warte auf den Start ...
-timeout /t 4 /nobreak >nul
+set /a VP_TRIES=0
+:waitport
+set /a VP_TRIES+=1
+".venv\Scripts\python.exe" -c "import socket; socket.create_connection(('127.0.0.1',8501),1)" >nul 2>&1
+if not errorlevel 1 goto :openbrowser
+if %VP_TRIES% GEQ 15 goto :slowstart
+timeout /t 1 /nobreak >nul
+goto :waitport
+:openbrowser
 start "" http://localhost:8501
 echo ValuePulse laeuft im Hintergrund. Das Dashboard oeffnet sich im Darkmode.
 echo Zum Beenden das minimierte Fenster ValuePulse schliessen.
 exit /b 0
+:slowstart
+echo Der Start dauert laenger als gedacht. Bitte http://localhost:8501 selbst oeffnen.
+exit /b 1

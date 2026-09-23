@@ -2,6 +2,7 @@ from valuepulse.model import assess, strength_from_table
 from valuepulse.pro import (
     bookmaker_margin,
     build_pro_view,
+    fractional_kelly,
     kelly_fraction,
     power_probabilities,
     score_matrix,
@@ -24,6 +25,7 @@ def test_shin_und_power_liegen_bei_100_prozent():
 def test_kelly_ist_null_ohne_vorteil():
     assert abs(kelly_fraction(0.60, 2.0) - 0.20) < 1e-9
     assert kelly_fraction(0.40, 2.0) == 0.0
+    assert abs(fractional_kelly(0.60, 2.0) - 0.05) < 1e-9
 
 
 def test_matrix_hat_sechs_mal_sechs_felder():
@@ -38,5 +40,6 @@ def test_pro_sicht_enthaelt_kelly_und_shin():
     result = assess(model=model, quotes=_quotes(model.probs, home_edge=0.08, age_hours=1), now=NOW)
     view = build_pro_view(result)
     assert view.kelly["home"] > 0
+    assert abs(view.recommended_stake["home"] - view.kelly["home"] * 0.25) < 1e-9
     assert abs(sum(view.shin.values()) - 1) < 1e-6
     assert view.matrix

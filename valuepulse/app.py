@@ -230,6 +230,7 @@ def _render_dashboard(data: DashboardData) -> None:
             <span class="vp-badge vp-badge-yellow">Gelb · Value, Daten dünn</span>
             <span class="vp-badge vp-badge-red">Rot · kein Vorteil</span>
         </div>
+        <p class="vp-note">Hinweis: ValuePulse nutzt ein vereinfachtes Grundmodell. Ein berechneter Edge ersetzt keine eigene Spiel-Analyse.</p>
         """,
         unsafe_allow_html=True,
     )
@@ -326,7 +327,7 @@ def _render_pro(data: DashboardData) -> None:
     st.subheader("Erweiterte Metriken")
     st.markdown(
         '<p class="vp-note">Poisson-Matrix, Buchmacher-Marge, faire Quoten nach Shin und Power, '
-        "sowie der volle Kelly-Anteil. Das ist eine Rechenhilfe, keine Einsatz-Anweisung.</p>",
+        "sowie ein Viertel-Kelly als empfohlener Höchsteinsatz. Das ist keine Einsatz-Anweisung.</p>",
         unsafe_allow_html=True,
     )
     if not data.matches:
@@ -340,18 +341,19 @@ def _render_pro(data: DashboardData) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Marge der besten Quoten", pct(view.margin))
     c2.metric(f"Edge {item.pick_label}", pct(item.edge))
-    c3.metric(f"Kelly {item.pick_label}", pct(view.kelly[item.pick]))
+    c3.metric("Empfohlener Max-Einsatz", pct(view.recommended_stake[item.pick]))
     if view.margin < 0:
         st.caption(
             "Eine negative Marge heißt: die besten Preise ergeben zusammen weniger als 100 %. "
             "Shin und Power rechnen sie trotzdem auf 100 % um."
         )
-    if view.kelly[item.pick] <= 0:
-        st.caption("Der Kelly-Anteil ist 0 %. Das Kriterium sieht hier keinen Einsatz.")
+    if view.recommended_stake[item.pick] <= 0:
+        st.caption("Empfohlener Max-Einsatz: 0 %. Der Viertel-Kelly sieht hier keinen Einsatz.")
     else:
         st.caption(
-            f"Voller Kelly-Anteil: {pct(view.kelly[item.pick])} des Budgets auf {item.pick_label} "
-            f"bei Quote {decimal_de(item.odds[item.pick])}. Viele nutzen nur einen Teil davon."
+            f"Empfohlener Max-Einsatz: {pct(view.recommended_stake[item.pick])} des Budgets "
+            f"auf {item.pick_label} bei Quote {decimal_de(item.odds[item.pick])}. "
+            "Das ist ein Viertel des vollen Kelly-Anteils."
         )
     st.markdown(_pro_table(item, view), unsafe_allow_html=True)
     st.markdown("**Poisson-Matrix** · Wahrscheinlichkeit je Spielstand")
@@ -435,7 +437,7 @@ def _pro_table(item, view) -> str:
                 "Power": pct(view.power[key], 0),
                 "Edge roh": pct(view.edge_raw[key]),
                 "Edge Shin": pct(view.edge_shin[key]),
-                "Kelly": pct(view.kelly[key]),
+                "Max-Einsatz": pct(view.recommended_stake[key]),
             }
         )
     return _html_table(pd.DataFrame(rows))

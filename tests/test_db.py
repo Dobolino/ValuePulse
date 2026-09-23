@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from valuepulse.db import connect, latest_quotes, save_quotes
+from valuepulse.db import connect, delete_old_snapshots, latest_quotes, save_quotes
 from valuepulse.models import Quote
 
 
@@ -56,3 +56,31 @@ def test_fremdes_schema_wird_ersetzt(tmp_path):
     version = healed.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()["value"]
     healed.close()
     assert version == "1"
+
+
+def test_snapshots_aelter_als_90_tage_werden_geloescht(tmp_path):
+    path = tmp_path / "valuepulse.sqlite3"
+    conn = connect(path)
+    moment = datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc)
+    old = _quote()
+    fresh = Quote(
+        competition="Bundesliga",
+        kickoff=moment,
+        home="FC Bayern München",
+        away="Borussia Dortmund",
+        bookmaker="Neu",
+        home_odds=1.6,
+        draw_odds=4.0,
+        away_odds=5.4,
+        last_update=moment,
+        source="the-odds-api",
+    )
+    save_quotes(conn, [old], moment - timedelta(days=100))
+    save_quotes(conn, [fresh], moment)
+    removed = delete_old_snapshots(conn, now=moment)
+    conn.close()
+    assert removed == 1
+    again = connect(path)
+    rows = latest_quotes(again)
+    again.close()
+    assert [row.bookmaker for row in rows] == ["Neu"]
