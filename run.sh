@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Startet ValuePulse per Doppelklick oder im Terminal.
+# Startet ValuePulse im Hintergrund und öffnet das dunkle Dashboard.
 set -u
 cd "$(dirname "$0")"
 
@@ -43,5 +43,44 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
   echo "Hinweis: .env wurde angelegt. Ohne API-Schlüssel startet der Demo-Modus."
 fi
 
-echo "ValuePulse öffnet sich im Browser. Dieses Fenster offen lassen."
-exec streamlit run valuepulse/app.py --server.port 8501
+port_open() {
+  python -c "import socket; socket.create_connection(('127.0.0.1',8501),1)" >/dev/null 2>&1
+}
+
+open_browser() {
+  url="http://localhost:8501"
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+  else
+    echo "Bitte öffne $url im Browser."
+  fi
+}
+
+if port_open; then
+  echo "ValuePulse läuft bereits. Das Dashboard öffnet sich im Darkmode."
+  open_browser
+  exit 0
+fi
+
+nohup python -m streamlit run valuepulse/app.py \
+  --server.port 8501 \
+  --server.headless true \
+  --theme.base dark \
+  --browser.gatherUsageStats false \
+  >> valuepulse.log 2>&1 &
+echo $! > .valuepulse.pid
+disown >/dev/null 2>&1 || true
+
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if port_open; then
+    open_browser
+    echo "ValuePulse wurde gestartet. Das Dashboard öffnet sich im Darkmode."
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "Der Start dauert länger als gedacht. Details stehen in valuepulse.log."
+exit 1

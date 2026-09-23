@@ -6,4 +6,5 @@ __pycache__/
 valuepulse.sqlite3
 valuepulse.sqlite3.bak
 *.log
+.valuepulse.pid
 .streamlit/secrets.toml
