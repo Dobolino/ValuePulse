@@ -13,29 +13,124 @@ import pandas as pd
 import streamlit as st
 
 from valuepulse.config import LOOKAHEAD_DAYS, load_settings, save_env_keys
+from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
 from valuepulse.models import DashboardData, MatchView
+from valuepulse.monthcal import apply_day_click, month_weeks, shift_month, value_counts
 from valuepulse.pipeline import run
+from valuepulse.positions import STATUS_LABELS, add_position, list_positions, settle, summarize
 from valuepulse.pro import build_pro_view
 from valuepulse.providers import check_api_keys
 from valuepulse.slip import STAKE_CAP, Slip, build_slip
+from valuepulse.sports import SPORTS, sport_by_id
 
 st.set_page_config(
     page_title="ValuePulse",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 _CSS = """
 <style>
     html, body, [class*="css"] { font-size: 16px; }
-    .stApp { background: #0e141b; color: #e8eef5; }
-    .block-container {
-        padding-top: 1.6rem;
+    .stApp { background: #101214; color: #e8eef5; }
+    [data-testid="stSidebar"] {
+        background: #121316;
+        border-right: 1px solid #2b2f36;
+    }
+    [data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
+    [data-testid="stSidebar"] .stButton button,
+    [data-testid="stSidebar"] [data-testid^="stBaseButton"] {
+        justify-content: flex-start !important;
+        text-align: left !important;
+        border-radius: 12px;
+        min-height: 2.7rem;
+        padding: 0.55rem 0.9rem;
+        line-height: 1.4;
+        white-space: normal;
+    }
+    [data-testid="stSidebar"] .stButton button div,
+    [data-testid="stSidebar"] .stButton button span,
+    [data-testid="stSidebar"] .stButton button p {
+        justify-content: flex-start !important;
+        text-align: left !important;
+        width: 100%;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary,
+    [data-testid="stSidebar"] [data-testid="stExpander"] p {
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+    [data-testid="stSidebar"] .stButton button[kind="secondary"] {
+        background: transparent;
+        border: 1px solid transparent;
+        color: #d5dde6;
+    }
+    [data-testid="stMain"] .block-container {
+        padding-top: 2.4rem;
         padding-bottom: 3.5rem;
+        padding-left: 1.6rem;
+        padding-right: 1.6rem;
         max-width: 1180px;
+    }
+    .vp-page-title {
+        margin: 0 0 0.85rem;
+        padding: 0.2rem 0.15rem 0.35rem 0;
+        font-size: 1.7rem;
+        font-weight: 700;
+        line-height: 1.45;
+        letter-spacing: 0;
+        color: #f4f7fb;
+        overflow: visible;
+    }
+    [data-testid="stSelectbox"] .react-aria-ComboBox > div {
+        background: #2a3038 !important;
+        border: 1px solid #9aa6b5 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 0 0 1px rgba(154, 166, 181, 0.35);
+    }
+    [data-testid="stSelectbox"] .react-aria-ComboBox > div:focus-within,
+    [data-testid="stSelectbox"] .react-aria-ComboBox > div[data-focus-within="true"] {
+        border-color: #00e699 !important;
+        box-shadow: 0 0 0 1px #00e699;
+    }
+    [data-testid="stSelectbox"] input {
+        color: #f7fafc !important;
+        font-weight: 600;
+    }
+    [data-testid="stSelectboxVirtualDropdown"] {
+        background: #2a3038 !important;
+        border: 1px solid #9aa6b5 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55) !important;
+    }
+    [data-testid="stSelectboxVirtualDropdown"] [data-hovered] [data-item-hl],
+    [data-testid="stSelectboxVirtualDropdown"] [data-focused] [data-item-hl] {
+        background: rgba(0, 230, 153, 0.22) !important;
+    }
+    .vp-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin: 0 0 1rem;
+        color: #f4f7fb;
+        font-size: 1.25rem;
+        font-weight: 750;
+        line-height: 1.3;
+    }
+    .vp-logo {
+        width: 2.1rem;
+        height: 2.1rem;
+        border-radius: 10px;
+        background: #00e699;
+        color: #06281c;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        letter-spacing: -0.03em;
     }
     h1, h2, h3, p, li, label, span { overflow: visible; }
     p, li, .stMarkdown p, .stMarkdown li { line-height: 1.55; }
@@ -71,16 +166,17 @@ _CSS = """
         border-collapse: separate;
         border-spacing: 0;
         margin: 0.35rem 0 1rem;
-        background: #17202b;
+        background: #1b1e22;
+        border: 1px solid #2b2f36;
         border-radius: 12px;
         overflow: hidden;
     }
     .vp-table th, .vp-table td {
         text-align: left;
-        padding: 0.78rem 0.9rem;
+        padding: 0.85rem 0.95rem;
         line-height: 1.45;
         vertical-align: middle;
-        border-bottom: 1px solid #2c3a4b;
+        border-bottom: 1px solid #2b2f36;
         white-space: normal;
         overflow: visible;
         color: #e8eef5;
@@ -102,14 +198,14 @@ _CSS = """
     .vp-badge-yellow { background: #3d320f; color: #ffd56a; }
     .vp-badge-red { background: #3a2228; color: #ffb4b4; }
     .vp-card {
-        border: 1px solid #2c3a4b;
+        border: 1px solid #2b2f36;
         border-left: 8px solid #8b98a8;
-        border-radius: 14px;
-        padding: 1.05rem 1.15rem 1rem;
+        border-radius: 12px;
+        padding: 1.15rem 1.25rem 1.05rem;
         margin: 0 0 0.85rem;
-        background: #17202b;
+        background: #1b1e22;
     }
-    .vp-green { border-left-color: #3ddc97; }
+    .vp-green { border-left-color: #00e699; }
     .vp-yellow { border-left-color: #f0c14a; }
     .vp-red { border-left-color: #e07a7a; background: #141c26; }
     .vp-kicker { color: #b7c6d6; font-size: 0.92rem; line-height: 1.45; margin-bottom: 0.2rem; }
@@ -171,6 +267,16 @@ def _ensure_state() -> None:
         st.session_state.pick_start = st.session_state.search_from
     if "pick_end" not in st.session_state:
         st.session_state.pick_end = st.session_state.search_to
+    if "page" not in st.session_state:
+        st.session_state.page = "dashboard"
+    if "sport" not in st.session_state:
+        st.session_state.sport = "football"
+    if "cal_year" not in st.session_state:
+        st.session_state.cal_year = today.year
+        st.session_state.cal_month = today.month
+        st.session_state.range_phase = "start"
+    if "position_stake" not in st.session_state:
+        st.session_state.position_stake = 1.0
     settings = load_settings()
     if "form_fd" not in st.session_state:
         st.session_state.form_fd = settings.football_key
@@ -181,32 +287,55 @@ def _ensure_state() -> None:
 def main() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
     _ensure_state()
-    st.title("ValuePulse")
-    st.caption("Modell gegen Buchmacher. Ein Value-Signal beginnt bei einem Edge über 3 %.")
-
-    dashboard, pro, slip_tab, calendar, settings, help_tab = st.tabs(
-        [
-            "📊 Dashboard",
-            "💎 Pro",
-            "🎟️ Tippschein",
-            "🗓️ Datum",
-            "⚙️ Einstellungen",
-            "❓ Hilfe",
-        ]
-    )
+    _sidebar()
     data = _data()
-    with dashboard:
+    page = st.session_state.page
+    if page == "dashboard":
         _render_dashboard(data)
-    with pro:
-        _render_pro(data)
-    with slip_tab:
-        _render_slip(data)
-    with calendar:
-        _render_calendar()
-    with settings:
+    elif page == "strategy":
+        _render_strategy(data)
+    elif page == "positions":
+        _render_positions()
+    elif page == "calendar":
+        _render_calendar(data)
+    elif page == "settings":
         _render_settings()
-    with help_tab:
+    else:
+        _page_title("Hilfe")
         st.markdown(HELP_MARKDOWN)
+
+
+def _sidebar() -> None:
+    st.sidebar.markdown(
+        '<div class="vp-brand"><span class="vp-logo">VP</span><span>ValuePulse</span></div>',
+        unsafe_allow_html=True,
+    )
+    _nav("dashboard", "📊 Dashboard")
+    with st.sidebar.expander("⚽ Sportarten", expanded=True):
+        current = st.session_state.sport
+        for sport in SPORTS:
+            label = f"{sport.icon} {sport.name}"
+            if st.button(
+                label,
+                key=f"sport-{sport.id}",
+                type="primary" if sport.id == current else "secondary",
+                width="stretch",
+            ):
+                st.session_state.sport = sport.id
+                st.session_state.page = "dashboard"
+                st.rerun()
+    _nav("strategy", "📈 Strategie & Tippschein")
+    _nav("positions", "💼 Positionen")
+    _nav("calendar", "🗓️ Kalender")
+    _nav("settings", "⚙️ Einstellungen")
+    _nav("help", "❓ Hilfe")
+
+
+def _nav(page: str, label: str) -> None:
+    active = st.session_state.page == page
+    if st.sidebar.button(label, key=f"nav-{page}", type="primary" if active else "secondary", width="stretch"):
+        st.session_state.page = page
+        st.rerun()
 
 
 def _data() -> DashboardData:
@@ -218,6 +347,15 @@ def _data() -> DashboardData:
 
 
 def _render_dashboard(data: DashboardData) -> None:
+    sport = sport_by_id(st.session_state.sport)
+    _page_title(f"{sport.icon} {sport.name}")
+    if not sport.live:
+        st.info(
+            f"{sport.name} ist vorbereitet ({sport.note}) "
+            "Es werden noch keine Spiele abgefragt. Esports ist nicht enthalten. "
+            "Fußball bleibt die aktive Quelle."
+        )
+        return
     period = _period_label()
     left, right = st.columns([4, 1])
     with left:
@@ -261,6 +399,7 @@ def _render_dashboard(data: DashboardData) -> None:
         competition = st.selectbox("Liga", competitions)
     with value_col:
         only_value = st.checkbox("Nur Value-Signale", value=False)
+    st.number_input("Einsatz je Tipp (Einheiten)", min_value=0.1, step=0.5, key="position_stake")
 
     visible = _filter(matches, competition, only_value)
     if not visible:
@@ -276,36 +415,90 @@ def _render_dashboard(data: DashboardData) -> None:
     )
 
 
-def _render_calendar() -> None:
-    st.subheader("Zeitraum wählen")
+def _render_calendar(data: DashboardData) -> None:
+    _page_title("Sportkalender")
     st.markdown(
-        '<p class="vp-note">Die Auswahl im Kalender startet <b>keine</b> Berechnung. '
-        "Erst der Button darunter holt die Spiele und rechnet die Signale.</p>",
+        '<p class="vp-note">Ein Klick auf einen Tag setzt nur den Zeitraum. '
+        "Die Analyse startet erst mit <b>Spiele für gewählten Zeitraum berechnen</b>. "
+        "Grüne Zahlen sind Value-Signale im zuletzt berechneten Fenster.</p>",
         unsafe_allow_html=True,
     )
+    year = int(st.session_state.cal_year)
+    month = int(st.session_state.cal_month)
+    prev_col, title_col, next_col = st.columns([1, 3, 1])
+    with prev_col:
+        if st.button("←", key="cal-prev"):
+            st.session_state.cal_year, st.session_state.cal_month = shift_month(year, month, -1)
+            st.rerun()
+    with title_col:
+        st.markdown(
+            f'<p class="vp-page-title">{html.escape(calendar_title(year, month))}</p>',
+            unsafe_allow_html=True,
+        )
+    with next_col:
+        if st.button("→", key="cal-next"):
+            st.session_state.cal_year, st.session_state.cal_month = shift_month(year, month, 1)
+            st.rerun()
+    counts = value_counts(data.matches, year, month)
+    weekday_row = st.columns(7)
+    for index, name in enumerate(("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")):
+        weekday_row[index].caption(name)
+    for week in month_weeks(year, month):
+        cells = st.columns(7)
+        for index, day in enumerate(week):
+            with cells[index]:
+                if day is None:
+                    st.write("")
+                    continue
+                mark = counts.get(day, 0)
+                label = str(day.day) if mark == 0 else f"{day.day} · {mark}"
+                if st.button(label, key=f"day-{day.isoformat()}"):
+                    start, end, phase = apply_day_click(
+                        st.session_state.get("pick_start"),
+                        str(st.session_state.get("range_phase", "start")),
+                        day,
+                    )
+                    st.session_state.pick_start = start
+                    st.session_state.pick_end = end
+                    st.session_state.range_phase = phase
+                    st.rerun()
     start_col, end_col = st.columns(2)
     with start_col:
         st.date_input("Startdatum", key="pick_start", format="DD.MM.YYYY")
     with end_col:
         st.date_input("Enddatum", key="pick_end", format="DD.MM.YYYY")
-    st.caption(f"Zuletzt berechnet: {_period_label()}.")
-    if st.button("Spiele suchen & berechnen", type="primary"):
-        start = st.session_state.pick_start
-        end = st.session_state.pick_end
-        if end < start:
-            st.error("Das Enddatum liegt vor dem Startdatum. Bitte die Tage tauschen.")
-        elif (end - start).days > 31:
-            st.error("Bitte höchstens 31 Tage auf einmal wählen, damit die API-Kontingente reichen.")
-        else:
-            st.session_state.search_from = start
-            st.session_state.search_to = end
-            st.session_state.vp_refresh = int(st.session_state.get("vp_refresh", 0)) + 1
-            st.cache_data.clear()
-            st.rerun()
+    st.caption(f"Zuletzt berechnet: {_period_label()}. Der Klick oben hat noch nichts neu geladen.")
+    if st.button("Spiele für gewählten Zeitraum berechnen", type="primary"):
+        _commit_range()
+
+
+def calendar_title(year: int, month: int) -> str:
+    names = (
+        "Januar", "Februar", "März", "April", "Mai", "Juni",
+        "Juli", "August", "September", "Oktober", "November", "Dezember",
+    )
+    return f"{names[month - 1]} {year}"
+
+
+def _commit_range() -> None:
+    start = st.session_state.pick_start
+    end = st.session_state.pick_end
+    if end < start:
+        st.error("Das Enddatum liegt vor dem Startdatum. Bitte die Tage tauschen.")
+        return
+    if (end - start).days > 31:
+        st.error("Bitte höchstens 31 Tage auf einmal wählen, damit die API-Kontingente reichen.")
+        return
+    st.session_state.search_from = start
+    st.session_state.search_to = end
+    st.session_state.vp_refresh = int(st.session_state.get("vp_refresh", 0)) + 1
+    st.session_state.range_phase = "start"
+    st.cache_data.clear()
+    st.rerun()
 
 
 def _render_settings() -> None:
-    st.subheader("API-Schlüssel")
+    _page_title("API-Schlüssel")
     st.markdown(
         '<p class="vp-note">Die Schlüssel bleiben auf diesem Rechner in der Datei <b>.env</b>. '
         "Ohne gültige Schlüssel läuft der Demo-Modus.</p>",
@@ -337,8 +530,91 @@ def _render_settings() -> None:
         st.rerun()
 
 
+def _render_strategy(data: DashboardData) -> None:
+    _page_title("Strategie & Tippschein")
+    choice = st.radio("Ansicht", ["Tippschein", "Pro"], horizontal=True)
+    scoped = data
+    if st.session_state.sport != "football":
+        scoped = DashboardData(mode=data.mode, banner=data.banner, matches=[])
+    if choice == "Pro":
+        _render_pro(scoped)
+    else:
+        _render_slip(scoped)
+
+
+def _render_positions() -> None:
+    _page_title("Positionen")
+    st.markdown(
+        '<p class="vp-note">Hier siehst du, ob die gespeicherten Tipps aufgegangen sind. '
+        "Neue Tipps kommen über den Button am Spiel im Dashboard.</p>",
+        unsafe_allow_html=True,
+    )
+    settings = load_settings()
+    conn = connect(settings.db_path)
+    try:
+        rows = list_positions(conn)
+        summary = summarize(rows)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Gesamt G&V", _units(summary.pnl))
+        rate = "—" if summary.win_rate is None else pct(summary.win_rate, 1)
+        c2.metric("Gewinnrate", f"{rate} | {summary.wins}W - {summary.losses}L")
+        c3.metric("Aktive Positionen", str(summary.open_count))
+        roi = "—" if summary.roi is None else pct(summary.roi, 1)
+        c4.metric("ROI / Yield", roi)
+        open_rows = [row for row in rows if row.status == "open"]
+        if open_rows:
+            labels = [f"#{row.id} {row.match_label} · {row.pick_label}" for row in open_rows]
+            picked = st.selectbox("Offene Position", labels)
+            result = st.radio("Ergebnis nach dem Spiel", ["Gewonnen", "Verloren", "Storniert"], horizontal=True)
+            if st.button("Ergebnis speichern", type="primary"):
+                status = {"Gewonnen": "won", "Verloren": "lost", "Storniert": "void"}[result]
+                settle(conn, open_rows[labels.index(picked)].id, status)
+                st.rerun()
+        if not rows:
+            st.info("Noch keine Position. Im Dashboard bei einem Spiel auf „Tipp zu Positionen hinzufügen“ klicken.")
+        else:
+            table = [
+                {
+                    "Datum": row.created_at[:10],
+                    "Sportart": _sport_name(row.sport),
+                    "Liga": row.competition,
+                    "Match": row.match_label,
+                    "Tipp": row.pick_label,
+                    "Quote": decimal_de(row.odds),
+                    "Modell": pct(row.probability, 1),
+                    "Einsatz": _units(row.stake).replace("+", ""),
+                    "Ergebnis": _status_mark(row.status),
+                }
+                for row in rows
+            ]
+            st.markdown(_html_table(pd.DataFrame(table)), unsafe_allow_html=True)
+    finally:
+        conn.close()
+
+
+def _page_title(text: str) -> None:
+    st.markdown(f'<p class="vp-page-title">{html.escape(text)}</p>', unsafe_allow_html=True)
+
+
+def _units(value: float) -> str:
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.2f} Einheiten".replace(".", ",")
+
+
+def _sport_name(sport_id: str) -> str:
+    try:
+        return sport_by_id(sport_id).name
+    except ValueError:
+        return sport_id
+
+
+def _status_mark(status: str) -> str:
+    marks = {"open": "⏳", "won": "🟢", "lost": "🔴", "void": "🟡"}
+    return f"{marks.get(status, '')} {STATUS_LABELS.get(status, status)}"
+
+
 def _render_slip(data: DashboardData) -> None:
-    st.subheader("Tippschein-Generator")
+    _page_title("Tippschein-Generator")
     st.markdown(
         '<p class="vp-note">Aus den Value-Signalen mit mehr als 3 % Edge wird ein Schein gebaut. '
         "Dieselbe Mannschaft kommt nur einmal vor. Der Button rechnet den Schein, "
@@ -441,7 +717,7 @@ def _copy_key(slip: Slip) -> str:
 
 
 def _render_pro(data: DashboardData) -> None:
-    st.subheader("Erweiterte Metriken")
+    _page_title("Erweiterte Metriken")
     st.markdown(
         '<p class="vp-note">Poisson-Matrix, Buchmacher-Marge, faire Quoten nach Shin und Power, '
         "sowie ein Viertel-Kelly als empfohlener Höchsteinsatz. Das ist keine Einsatz-Anweisung.</p>",
@@ -610,6 +886,30 @@ def _card(match: MatchView) -> None:
     </div>
     """
     st.markdown(body, unsafe_allow_html=True)
+    key = f"pos-{match.home}-{match.away}-{match.kickoff.isoformat()}"
+    if st.button("+ Tipp zu Positionen hinzufügen", key=key):
+        _save_position(match)
+
+
+def _save_position(match: MatchView) -> None:
+    item = match.assessment
+    settings = load_settings()
+    conn = connect(settings.db_path)
+    try:
+        add_position(
+            conn,
+            sport=str(st.session_state.sport),
+            competition=match.competition,
+            match_label=f"{match.home} – {match.away}",
+            kickoff=match.kickoff.isoformat(),
+            pick_label=item.pick_label,
+            odds=float(item.odds[item.pick]),
+            probability=float(item.model_probs[item.pick]),
+            stake=float(st.session_state.position_stake),
+        )
+    finally:
+        conn.close()
+    st.success(f"{match.home} – {match.away} liegt jetzt unter Positionen.")
 
 
 main()

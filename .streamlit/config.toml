@@ -7,8 +7,8 @@ port = 8501
 
 [theme]
 base = "dark"
-primaryColor = "#3DDC97"
-backgroundColor = "#0E141B"
-secondaryBackgroundColor = "#17202B"
+primaryColor = "#00E699"
+backgroundColor = "#101214"
+secondaryBackgroundColor = "#121316"
 textColor = "#E8EEF5"
 font = "sans serif"

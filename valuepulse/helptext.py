@@ -39,19 +39,22 @@ Alternativ im Terminal, im Ordner von ValuePulse: `./run.sh`
 
 Im Ordner von ValuePulse im Terminal: `./run.sh`
 
-## Die Reiter oben
+## Die Navigation links
 
 - **Dashboard:** die Ampel und die Begründung zu jedem Spiel.
-- **Pro:** Poisson-Matrix, Buchmacher-Marge, Shin- und Power-Methode, Edge und Kelly-Anteil.
-- **Tippschein:** baut aus den Value-Signalen einen Schein mit 2 bis 10 Spielen.
-  Wenig Risiko nimmt hohe Trefferchancen, Mittel mischt Edge und Chance,
-  Hoch nimmt den größten Edge. Fehlen Spiele, erscheint eine gelbe Warnung
-  **Spielschein gekürzt**.
-- **Datum:** Start- und Enddatum wählen. Es wird noch nichts gerechnet.
-  Erst der Button **Spiele suchen & berechnen** startet die Analyse.
+  Bei einem Signal kannst du **+ Tipp zu Positionen hinzufügen**.
+- **Sportarten:** Fußball ist aktiv. Tennis, Basketball, Baseball, UFC,
+  American Football und Darts sind vorbereitet und noch ohne eigene Spiele.
+  Esports ist nicht enthalten.
+- **Strategie & Tippschein:** baut aus den Value-Signalen einen Schein.
+  Die Ansicht **Pro** zeigt Poisson-Matrix, Marge, Shin, Power und Viertel-Kelly.
+  Fehlen Spiele, erscheint **Spielschein gekürzt**.
+- **Positionen:** gespeicherte Tipps, Gewinn und Verlust, Gewinnrate und ROI.
+  Nach dem Spiel trägst du Gewonnen, Verloren oder Storniert ein.
+- **Kalender:** Monatsansicht. Ein Tag setzt nur den Zeitraum.
+  Erst **Spiele für gewählten Zeitraum berechnen** startet die Analyse.
 - **Einstellungen:** Football-Data- und Odds-API-Schlüssel eintragen und mit
-  **Schlüssel lokal speichern** sichern. Dort steht auch, ob der Demo-Modus aktiv ist
-  und ob die Schlüssel gültig sind.
+  **Schlüssel lokal speichern** sichern.
 - **Hilfe:** diese Anleitung.
 
 ## API-Schlüssel (nur für echte Spiele)

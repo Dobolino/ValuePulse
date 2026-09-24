@@ -52,7 +52,7 @@ Jede abgerufene Quote landet in `valuepulse.sqlite3`. Quoten, die älter als 24 
 - Gelb: Vorteil rechnerisch da, Daten dünn oder Quote veraltet.
 - Rot/Grau: kein Vorteil gegenüber dem Buchmacher.
 
-Im Reiter **Datum** wählst du Start- und Enddatum. Gerechnet wird erst nach dem Button **Spiele suchen & berechnen**.
+Links liegt die Navigation. Im **Kalender** wählst du den Zeitraum. Gerechnet wird erst nach **Spiele für gewählten Zeitraum berechnen**. Unter **Positionen** siehst du, ob gespeicherte Tipps gewonnen haben.
 
 Neue Dateien holst du mit **update.bat** oder `./update.sh`. Dabei wird die Hauptversion **main** geholt. Ein ZIP-Ordner ohne Git lädt dieselben Dateien direkt; `.env` und `valuepulse.sqlite3` bleiben erhalten.
 
