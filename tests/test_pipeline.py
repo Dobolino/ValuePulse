@@ -20,11 +20,13 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, by_status=None, payload=None, matches=None, odds=None):
+    def __init__(self, by_status=None, payload=None, matches=None, odds=None, football_status=None, odds_by_region=None):
         self.by_status = by_status
         self.payload = payload
         self.matches = matches
         self.odds = odds
+        self.football_status = football_status
+        self.odds_by_region = odds_by_region
         self.calls = 0
         self.params = []
 
@@ -33,6 +35,8 @@ class FakeClient:
         self.params.append(params)
         if self.by_status is not None:
             return FakeResponse({"message": "limit"}, status=self.by_status)
+        if self.football_status is not None and ("/matches" in url or "/standings" in url):
+            return FakeResponse({"message": "limit"}, status=self.football_status)
         if "/matches" in url:
             if self.matches is not None:
                 return FakeResponse({"matches": self.matches})
@@ -66,7 +70,10 @@ class FakeClient:
                 }
             )
         if "/odds" in url:
-            payload = self.odds if self.odds is not None else _odds_payload()
+            if self.odds_by_region is not None:
+                payload = self.odds_by_region.get(params.get("regions"), [])
+            else:
+                payload = self.odds if self.odds is not None else _odds_payload()
             return FakeResponse(payload, headers={"x-requests-remaining": "412"})
         raise AssertionError(url)
 
@@ -138,6 +145,54 @@ def test_live_speichert_quoten_und_findet_value(tmp_path):
     assert any(params.get("regions") == "eu" for params in client.params)
 
 
+def test_football_429_nutzt_trotzdem_die_odds_api(tmp_path):
+    data = run(
+        Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"),
+        client=FakeClient(football_status=429),
+        now=NOW,
+    )
+    assert data.mode != "demo"
+    assert any(match.home == "Arsenal" for match in data.matches)
+    assert "The Odds API werden trotzdem verwendet" in data.banner
+    assert "Nordstern" not in {match.home for match in data.matches}
+
+
+def test_europa_ohne_quote_weicht_auf_grossbritannien_aus(tmp_path):
+    kickoff = KICKOFF
+    bare = [
+        {
+            "id": "evt",
+            "commence_time": kickoff,
+            "home_team": "Arsenal",
+            "away_team": "Chelsea",
+            "bookmakers": [],
+        }
+    ]
+    client = FakeClient(
+        football_status=429,
+        odds_by_region={"eu": bare, "uk": _odds_payload()},
+    )
+    data = run(Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"), client=client, now=NOW)
+    assert data.mode != "demo"
+    assert any(match.home == "Arsenal" for match in data.matches)
+    assert any(params.get("regions") == "uk" for params in client.params)
+
+
+def test_unentschieden_wird_als_remis_gelesen(tmp_path):
+    payload = _odds_payload()
+    for book in payload[0]["bookmakers"]:
+        for outcome in book["markets"][0]["outcomes"]:
+            if outcome["name"] == "Draw":
+                outcome["name"] = "Unentschieden"
+    data = run(
+        Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"),
+        client=FakeClient(odds=payload),
+        now=NOW,
+    )
+    assert data.mode == "live"
+    assert any(match.home == "Arsenal FC" for match in data.matches)
+
+
 def test_http_429_ohne_speicher_wird_demo(tmp_path):
     data = run(
         Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"),
@@ -173,7 +228,7 @@ def test_ohne_quoten_faellt_auf_demo_zurueck(tmp_path):
         client=FakeClient(odds=[]),
         now=NOW,
     )
-    _assert_demo_fallback(data, "Es lagen keine Quoten vor.")
+    _assert_demo_fallback(data, "keine lesbare 1X2-Quote")
 
 
 def test_ohne_spiele_im_zeitfenster_faellt_auf_demo_zurueck(tmp_path):

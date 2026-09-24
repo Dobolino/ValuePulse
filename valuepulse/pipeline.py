@@ -79,18 +79,24 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     odds_limited = False
     odds_remaining: int | None = None
 
+    football_budget: int | None = None
+    cached_standings = load_standings(conn)
+    have_table = {row.competition_code for row in cached_standings}
+
     for league in LEAGUES:
+        if football_budget is not None and football_budget < 1:
+            football_limited = True
+            warnings.append("Football-Data: Das Minutenlimit ist erreicht, weitere Ligen warten.")
+            break
         try:
-            fixtures.extend(
-                fetch_matches(
-                    client,
-                    settings.football_key,
-                    league,
-                    date_from=window.start_day.isoformat(),
-                    date_to=window.end_day.isoformat(),
-                )
+            batch, football_budget = fetch_matches(
+                client,
+                settings.football_key,
+                league,
+                date_from=window.start_day.isoformat(),
+                date_to=window.end_day.isoformat(),
             )
-            standings.extend(fetch_standings(client, settings.football_key, league))
+            fixtures.extend(batch)
         except RateLimitError:
             football_limited = True
             warnings.append("Football-Data hat das Abruf-Limit erreicht (HTTP 429).")
@@ -101,12 +107,38 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
         except ProviderError as exc:
             warnings.append(f"{league['name']}: Spieldaten nicht ladbar ({exc}).")
 
+    # Tabellen nicht im selben Schwung wie die Spiele ziehen, wenn das Minutenlimit
+    # schon eng ist. Eine gespeicherte Tabelle reicht, sonst rechnet das Modell neutral.
+    if not football_limited:
+        for league in LEAGUES:
+            if league["code"] in have_table:
+                continue
+            if football_budget is not None and football_budget < 1:
+                football_limited = True
+                warnings.append("Football-Data: Tabelle übersprungen, das Minutenlimit ist erreicht.")
+                break
+            try:
+                rows, football_budget = fetch_standings(client, settings.football_key, league)
+                standings.extend(rows)
+            except RateLimitError:
+                football_limited = True
+                warnings.append("Football-Data hat das Abruf-Limit erreicht (HTTP 429).")
+                break
+            except AuthError:
+                warnings.append("Football-Data hat den Schlüssel abgelehnt.")
+                break
+            except ProviderError as exc:
+                warnings.append(f"{league['name']}: Tabelle nicht ladbar ({exc}).")
+
     if standings:
         save_standings(conn, standings, now)
+        fresh_codes = {row.competition_code for row in standings}
+        standings.extend(row for row in cached_standings if row.competition_code not in fresh_codes)
 
+    odds_outside = 0
     for league in LEAGUES:
         try:
-            batch, remaining = fetch_odds(
+            batch, remaining, outside = fetch_odds(
                 client,
                 settings.odds_key,
                 league,
@@ -115,6 +147,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
                 fetched_at=now,
             )
             quotes.extend(batch)
+            odds_outside += outside
             if remaining is not None:
                 odds_remaining = remaining
         except RateLimitError:
@@ -137,8 +170,14 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             used_cache = True
             warnings.append("Keine frischen Quoten. Gespeicherte Quoten werden verwendet.")
         else:
-            reason = " ".join(warnings) or "Es lagen keine Quoten vor."
-            return _safe_demo(now, reason, window)
+            if odds_outside and "Zeitraum" not in " ".join(warnings):
+                warnings.append(
+                    "The Odds API hat Spiele geliefert, aber keines liegt im gewählten Zeitraum."
+                )
+            elif not odds_limited and not any("Odds API" in note for note in warnings):
+                warnings.append("The Odds API hat im Zeitraum keine lesbare 1X2-Quote geliefert.")
+            reason = " ".join(dict.fromkeys(warnings)) or "Es lagen keine Quoten vor."
+            return _safe_demo(now, reason, window, odds_remaining=odds_remaining)
 
     if not fixtures:
         fixtures = _fixtures_from_quotes(quotes, window)
@@ -161,7 +200,14 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     if not matches:
         return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.", window)
 
-    if used_cache or football_limited or odds_limited:
+    if football_limited and quotes and not used_cache:
+        mode = "eingeschraenkt"
+        banner = (
+            "Football-Data hat das Abruf-Limit erreicht (HTTP 429). "
+            "Die Quoten von The Odds API werden trotzdem verwendet. "
+            "Die Datenqualität ist deshalb etwas niedriger."
+        )
+    elif used_cache or odds_limited:
         mode = "cache"
         banner = (
             "Gelbe Warnung: API-Limit oder Störung. "
@@ -178,17 +224,23 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
         mode=mode,
         banner=banner,
         matches=matches,
-        warnings=warnings,
+        warnings=list(dict.fromkeys(warnings)),
         odds_requests_remaining=odds_remaining,
         generated_at=now,
     )
 
 
-def _safe_demo(now: datetime, reason: str, window: Window) -> DashboardData:
+def _safe_demo(
+    now: datetime,
+    reason: str,
+    window: Window,
+    *,
+    odds_remaining: int | None = None,
+) -> DashboardData:
     try:
-        return _from_demo(now, reason, window)
+        data = _from_demo(now, reason, window)
     except Exception:
-        return DashboardData(
+        data = DashboardData(
             mode="demo",
             banner=(
                 "Demo-Modus: Die Beispiel-Daten ließen sich nicht aufbauen. "
@@ -197,6 +249,8 @@ def _safe_demo(now: datetime, reason: str, window: Window) -> DashboardData:
             matches=[],
             generated_at=now,
         )
+    data.odds_requests_remaining = odds_remaining
+    return data
 
 
 def _from_demo(now: datetime, reason: str, window: Window) -> DashboardData:

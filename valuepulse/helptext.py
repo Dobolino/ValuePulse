@@ -97,9 +97,11 @@ Wenn es geklappt hat, steht dort: *ValuePulse wurde erfolgreich aktualisiert!*
 ## Wenn etwas hakt
 
 - **Schlüssel fehlen oder das Abruf-Limit ist voll (HTTP 429):**
-  ValuePulse stürzt nicht ab. Es nutzt gespeicherte Quoten aus
-  `valuepulse.sqlite3` und zieht Punkte bei der Datenqualität ab.
-  Liegt nichts Speicherbares vor, erscheint der Demo-Modus.
+  ValuePulse stürzt nicht ab. Ein Limit bei Football-Data stoppt die Quoten
+  von The Odds API nicht. Fehlt in Europa eine lesbare 1X2-Quote, wird
+  dieselbe Liga einmal in Großbritannien gefragt. Gespeicherte Quoten aus
+  `valuepulse.sqlite3` werden genutzt, die Datenqualität sinkt.
+  Liegt gar nichts Speicherbares vor, erscheint der Demo-Modus.
 - **Quote älter als 24 Stunden:** Das Spiel wird trotzdem bewertet.
   Die Datenqualität sinkt, ein Value-Signal bleibt deshalb gelb.
 - **„Python wurde nicht gefunden“ und der Microsoft Store:** Windows hat kein echtes

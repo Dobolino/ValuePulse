@@ -90,8 +90,8 @@ def fetch_matches(
     *,
     date_from: str,
     date_to: str,
-) -> list[Fixture]:
-    payload, _headers = _request_json(
+) -> tuple[list[Fixture], int | None]:
+    payload, headers = _request_json(
         client,
         f"{FOOTBALL_DATA_BASE}/competitions/{league['code']}/matches",
         headers={"X-Auth-Token": api_key},
@@ -119,11 +119,11 @@ def fetch_matches(
                 match_id=str(item.get("id") or f"{league['code']}-{home}-{away}"),
             )
         )
-    return fixtures
+    return fixtures, _minute_budget(headers)
 
 
-def fetch_standings(client: HttpClient, api_key: str, league: dict) -> list[Standing]:
-    payload, _headers = _request_json(
+def fetch_standings(client: HttpClient, api_key: str, league: dict) -> tuple[list[Standing], int | None]:
+    payload, headers = _request_json(
         client,
         f"{FOOTBALL_DATA_BASE}/competitions/{league['code']}/standings",
         headers={"X-Auth-Token": api_key},
@@ -154,7 +154,7 @@ def fetch_standings(client: HttpClient, api_key: str, league: dict) -> list[Stan
             )
         except (TypeError, ValueError):
             continue
-    return rows
+    return rows, _minute_budget(headers)
 
 
 def fetch_odds(
@@ -165,14 +165,53 @@ def fetch_odds(
     window_start: datetime,
     window_end: datetime,
     fetched_at: datetime,
-) -> tuple[list[Quote], int | None]:
+) -> tuple[list[Quote], int | None, int]:
+    """Lädt 1X2-Quoten. Europa zuerst, Großbritannien nur wenn dort keine Quote lesbar ist.
+
+    Der dritte Wert zählt Spiele, die außerhalb des gewählten Zeitraums lagen.
+    """
+    quotes, remaining, outside = _fetch_odds_region(
+        client,
+        api_key,
+        league,
+        region="eu",
+        window_start=window_start,
+        window_end=window_end,
+        fetched_at=fetched_at,
+    )
+    if quotes or outside:
+        return quotes, remaining, outside
+    uk_quotes, uk_remaining, uk_outside = _fetch_odds_region(
+        client,
+        api_key,
+        league,
+        region="uk",
+        window_start=window_start,
+        window_end=window_end,
+        fetched_at=fetched_at,
+    )
+    if uk_remaining is not None:
+        remaining = uk_remaining
+    return uk_quotes, remaining, outside + uk_outside
+
+
+def _fetch_odds_region(
+    client: HttpClient,
+    api_key: str,
+    league: dict,
+    *,
+    region: str,
+    window_start: datetime,
+    window_end: datetime,
+    fetched_at: datetime,
+) -> tuple[list[Quote], int | None, int]:
     payload, headers = _request_json(
         client,
         f"{ODDS_API_BASE}/sports/{league['sport']}/odds",
         headers={},
         params={
             "apiKey": api_key,
-            "regions": "eu",
+            "regions": region,
             "markets": "h2h",
             "oddsFormat": "decimal",
             "dateFormat": "iso",
@@ -183,6 +222,7 @@ def fetch_odds(
         raise ProviderError("Die Quoten-API lieferte ein unerwartetes Format.")
 
     quotes: list[Quote] = []
+    outside = 0
     for event in payload:
         if not isinstance(event, dict):
             continue
@@ -192,12 +232,27 @@ def fetch_odds(
         if kickoff is None or not home or not away:
             continue
         if kickoff < window_start or kickoff > window_end:
+            outside += 1
             continue
         for book in event.get("bookmakers") or []:
             quote = _quote_from_book(book, league["name"], kickoff, str(home), str(away), fetched_at)
             if quote is not None:
                 quotes.append(quote)
-    return quotes, remaining
+    return quotes, remaining, outside
+
+
+def _minute_budget(headers: Any) -> int | None:
+    """Restliche Football-Data-Abrufe in dieser Minute, falls die API sie nennt."""
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    raw = getter("X-Requests-Available-Minute") or getter("x-requests-available-minute")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _remaining(headers: Any) -> int | None:
@@ -232,6 +287,7 @@ def _quote_from_book(
             outcomes = market.get("outcomes") or []
             break
     prices = {"home": None, "draw": None, "away": None}
+    unnamed: list[float] = []
     for outcome in outcomes:
         if not isinstance(outcome, dict):
             continue
@@ -243,8 +299,13 @@ def _quote_from_book(
         if price <= 1.01:
             continue
         slot = _slot(name, home, away)
-        if slot and (prices[slot] is None or price > prices[slot]):
+        if slot is None:
+            unnamed.append(price)
+            continue
+        if prices[slot] is None or price > prices[slot]:
             prices[slot] = price
+    if prices["draw"] is None and len(unnamed) == 1 and prices["home"] is not None and prices["away"] is not None:
+        prices["draw"] = unnamed[0]
     if any(value is None for value in prices.values()):
         return None
     last_update = parse_dt(book.get("last_update")) or fetched_at
@@ -262,8 +323,11 @@ def _quote_from_book(
     )
 
 
+_DRAW_NAMES = {"draw", "tie", "x", "unentschieden", "the draw", "remis", "nul"}
+
+
 def _slot(name: str, home: str, away: str) -> str | None:
-    if name.strip().lower() == "draw":
+    if name.strip().lower() in _DRAW_NAMES:
         return "draw"
     if names_match(name, home):
         return "home"
