@@ -7,6 +7,7 @@ einer anderen Programmversion, legt ValuePulse sie beiseite und beginnt neu.
 from __future__ import annotations
 
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from valuepulse.models import Quote, Standing
 
 SCHEMA_VERSION = "1"
 SNAPSHOT_KEEP_DAYS = 90
+CONNECT_TIMEOUT_SECONDS = 10.0
+LOCK_ATTEMPTS = 3
+LOCK_WAIT_SECONDS = 0.5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -65,26 +69,47 @@ def _backup(path: Path) -> None:
     path.replace(bak)
 
 
-def connect(path: Path) -> sqlite3.Connection:
-    """Öffnet die Datenbank und heilt Schema oder Dateischäden."""
+def connect(path: Path, *, timeout: float = CONNECT_TIMEOUT_SECONDS) -> sqlite3.Connection:
+    """Öffnet die Datenbank und heilt Schema oder Dateischäden.
+
+    Eine Sperre ist kein Schaden: die Datei bleibt, der Aufruf versucht es
+    kurz erneut. Nur eine beschädigte Datei oder ein fremdes Schema wird
+    beiseitegelegt.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
-        _ensure_schema(conn)
-        delete_old_snapshots(conn)
-        return conn
-    except sqlite3.DatabaseError:
+    for attempt in range(1, LOCK_ATTEMPTS + 1):
         try:
-            conn.close()
-        except Exception:
-            pass
-        _backup(path)
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+            return _open(path, timeout)
+        except sqlite3.OperationalError as exc:
+            if not _is_locked(exc):
+                return _rebuild(path, timeout)
+            if attempt == LOCK_ATTEMPTS:
+                raise
+            time.sleep(LOCK_WAIT_SECONDS)
+        except sqlite3.DatabaseError:
+            return _rebuild(path, timeout)
+    raise sqlite3.OperationalError("database is locked")
+
+
+def _open(path: Path, timeout: float) -> sqlite3.Connection:
+    conn = sqlite3.connect(path, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    try:
         _ensure_schema(conn)
         delete_old_snapshots(conn)
-        return conn
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
+def _rebuild(path: Path, timeout: float) -> sqlite3.Connection:
+    _backup(path)
+    return _open(path, timeout)
+
+
+def _is_locked(exc: sqlite3.OperationalError) -> bool:
+    return "locked" in str(exc).lower()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -211,6 +236,7 @@ def load_standings(conn: sqlite3.Connection) -> list[Standing]:
             points=row["points"],
             goals_for=row["goals_for"],
             goals_against=row["goals_against"],
+            updated_at=_parse_dt(row["updated_at"]),
         )
         for row in rows
     ]

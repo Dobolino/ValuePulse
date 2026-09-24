@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
-from valuepulse.config import LEAGUES, Settings, load_settings
+from valuepulse.config import LEAGUES, STANDINGS_TTL_HOURS, Settings, load_settings
 from valuepulse.db import connect, latest_quotes, load_standings, save_quotes, save_standings
 from valuepulse.demo import build_demo
 from valuepulse.model import assess, strength_from_table
-from valuepulse.models import DashboardData, Fixture, MatchView, Quote, Standing
+from valuepulse.models import BookLine, DashboardData, Fixture, MatchView, Quote, Standing
 from valuepulse.names import names_match, similarity
 from valuepulse.providers import (
     AuthError,
@@ -81,7 +81,10 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
 
     football_budget: int | None = None
     cached_standings = load_standings(conn)
-    have_table = {row.competition_code for row in cached_standings}
+    cached_by_code: dict[str, list[Standing]] = {}
+    for row in cached_standings:
+        cached_by_code.setdefault(row.competition_code, []).append(row)
+    fresh_codes = {code for code, rows in cached_by_code.items() if _standings_fresh(rows, now)}
 
     for league in LEAGUES:
         if football_budget is not None and football_budget < 1:
@@ -111,7 +114,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     # schon eng ist. Eine gespeicherte Tabelle reicht, sonst rechnet das Modell neutral.
     if not football_limited:
         for league in LEAGUES:
-            if league["code"] in have_table:
+            if league["code"] in fresh_codes:
                 continue
             if football_budget is not None and football_budget < 1:
                 football_limited = True
@@ -313,6 +316,7 @@ def _evaluate(
             now=now,
             api_limited=api_limited,
             is_demo=is_demo,
+            stale_table=model.used_table and _table_is_stale(table, now),
         )
         if result is None:
             continue
@@ -324,6 +328,7 @@ def _evaluate(
                 home=fixture.home,
                 away=fixture.away,
                 assessment=result,
+                books=_book_lines(attached),
             )
         )
     views.sort(key=lambda item: (_SIGNAL_ORDER[item.assessment.signal], item.kickoff))
@@ -335,6 +340,41 @@ def _code_for_competition(name: str) -> str:
         if league["name"] == name:
             return league["code"]
     return ""
+
+
+def _standings_fresh(rows: list[Standing], now: datetime) -> bool:
+    """True, wenn jede Zeile einen Zeitstempel hat und keine älter als 24 Stunden ist."""
+    if not rows or any(row.updated_at is None for row in rows):
+        return False
+    return not _table_is_stale(rows, now)
+
+
+def _table_is_stale(rows: list[Standing], now: datetime) -> bool:
+    moments: list[datetime] = []
+    for row in rows:
+        if row.updated_at is None:
+            continue
+        moment = row.updated_at
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        moments.append(moment)
+    if not moments:
+        return False
+    return now - min(moments) > timedelta(hours=STANDINGS_TTL_HOURS)
+
+
+def _book_lines(quotes: list[Quote]) -> tuple[BookLine, ...]:
+    lines: dict[str, BookLine] = {}
+    for quote in quotes:
+        if min(quote.home_odds, quote.draw_odds, quote.away_odds) <= 1.01:
+            continue
+        lines[quote.bookmaker] = BookLine(
+            quote.bookmaker,
+            quote.home_odds,
+            quote.draw_odds,
+            quote.away_odds,
+        )
+    return tuple(lines.values())
 
 
 def _table_for(fixture: Fixture, standings: list[Standing]) -> list[Standing]:

@@ -21,6 +21,8 @@ EDGE_MIN = 0.03
 QUALITY_GREEN_MIN = 75
 # Quoten älter als diese Grenze senken die Datenqualität, stoppen aber nicht.
 STALE_ODDS_HOURS = 24
+# Ligatabellen älter als diese Grenze werden neu geholt.
+STANDINGS_TTL_HOURS = 24
 # Nur Spiele in diesem Fenster landen im Dashboard.
 LOOKAHEAD_DAYS = 7
 

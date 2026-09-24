@@ -152,6 +152,7 @@ def data_quality(
     bookmaker_count: int,
     api_limited: bool,
     is_demo: bool,
+    stale_table: bool = False,
 ) -> tuple[int, list[str]]:
     """Punktzahl 0–100. Abzüge erklären sich selbst in Klartext.
 
@@ -184,6 +185,11 @@ def data_quality(
     if not used_table:
         score -= 30
         notes.append("Ohne vollständige Tabelle ist die Modellschätzung unsicherer.")
+    elif stale_table:
+        score -= 15
+        notes.append(
+            "Die Tabelle ist älter als 24 Stunden. Die Datenqualität ist deshalb niedriger."
+        )
     if bookmaker_count < 2:
         score -= 10
         notes.append("Nur ein Buchmacher hat eine Quote geliefert.")
@@ -201,6 +207,7 @@ def assess(
     now: datetime,
     api_limited: bool = False,
     is_demo: bool = False,
+    stale_table: bool = False,
 ) -> Assessment | None:
     """Baut Ampel, Überschrift und Klartext. Gibt None zurück, wenn Quoten fehlen."""
     if not quotes:
@@ -234,6 +241,7 @@ def assess(
         bookmaker_count=len({quote.bookmaker for quote in quotes}),
         api_limited=api_limited,
         is_demo=is_demo,
+        stale_table=stale_table,
     )
     if model.note:
         notes.insert(0, model.note)

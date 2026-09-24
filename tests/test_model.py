@@ -105,6 +105,26 @@ def test_api_limit_senkt_die_qualitaet():
     assert notes
 
 
+def test_veraltete_tabelle_senkt_die_qualitaet():
+    fresh, _notes = data_quality(
+        odds_age_hours=1,
+        used_table=True,
+        bookmaker_count=3,
+        api_limited=False,
+        is_demo=False,
+    )
+    stale, notes = data_quality(
+        odds_age_hours=1,
+        used_table=True,
+        bookmaker_count=3,
+        api_limited=False,
+        is_demo=False,
+        stale_table=True,
+    )
+    assert stale == fresh - 15
+    assert any("älter als 24 Stunden" in note for note in notes)
+
+
 def test_vierundzwanzig_stunden_genau_ist_noch_frisch():
     score, _notes = data_quality(
         odds_age_hours=24,

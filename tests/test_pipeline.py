@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from valuepulse.config import Settings
+from valuepulse.config import LEAGUES, Settings
+from valuepulse.db import connect, save_standings
+from valuepulse.models import Standing
 from valuepulse.pipeline import run
 from valuepulse.providers import league_by_code
 
@@ -29,10 +31,12 @@ class FakeClient:
         self.odds_by_region = odds_by_region
         self.calls = 0
         self.params = []
+        self.urls = []
 
     def get(self, url, *, headers, params, timeout):
         self.calls += 1
         self.params.append(params)
+        self.urls.append(url)
         if self.by_status is not None:
             return FakeResponse({"message": "limit"}, status=self.by_status)
         if self.football_status is not None and ("/matches" in url or "/standings" in url):
@@ -141,6 +145,7 @@ def test_live_speichert_quoten_und_findet_value(tmp_path):
     assert home.assessment.edge > 0.03
     assert home.assessment.signal == "green"
     assert "Modell sieht" in home.assessment.explanation
+    assert {line.bookmaker for line in home.books} == {"Pinnacle", "Unibet"}
     assert client.calls > 0
     assert any(params.get("regions") == "eu" for params in client.params)
 
@@ -303,3 +308,51 @@ def test_ohne_zuordnung_faellt_auf_demo_zurueck(tmp_path):
 def test_ligen_sind_die_grossen_fuenf():
     codes = set(league_by_code())
     assert codes == {"PL", "BL1", "PD", "SA", "FL1"}
+
+
+def test_frische_tabelle_wird_nicht_erneut_geholt(tmp_path):
+    path = tmp_path / "valuepulse.sqlite3"
+    _seed_tables(path, NOW - timedelta(hours=2))
+    client = FakeClient()
+    run(Settings("fd-key", "odds-key", path), client=client, now=NOW)
+    assert not any("/standings" in url for url in client.urls)
+
+
+def test_alte_tabelle_wird_nach_24_stunden_neu_geholt(tmp_path):
+    path = tmp_path / "valuepulse.sqlite3"
+    _seed_tables(path, NOW - timedelta(hours=25))
+    client = FakeClient()
+    data = run(Settings("fd-key", "odds-key", path), client=client, now=NOW)
+    assert any("/competitions/PL/standings" in url for url in client.urls)
+    home = next(match for match in data.matches if "Arsenal" in match.home)
+    assert not any("älter als 24 Stunden" in note for note in home.assessment.quality_notes)
+
+
+def test_veraltete_tabelle_senkt_die_qualitaet_wenn_sie_bleiben_muss(tmp_path):
+    fresh_path = tmp_path / "fresh.sqlite3"
+    stale_path = tmp_path / "stale.sqlite3"
+    _seed_tables(fresh_path, NOW - timedelta(hours=2))
+    _seed_tables(stale_path, NOW - timedelta(hours=30))
+    fresh = run(Settings("fd-key", "odds-key", fresh_path), client=FakeClient(football_status=429), now=NOW)
+    stale = run(Settings("fd-key", "odds-key", stale_path), client=FakeClient(football_status=429), now=NOW)
+    fresh_match = next(match for match in fresh.matches if match.home == "Arsenal")
+    stale_match = next(match for match in stale.matches if match.home == "Arsenal")
+    assert fresh_match.assessment.used_table
+    assert stale_match.assessment.quality == fresh_match.assessment.quality - 15
+    assert any("älter als 24 Stunden" in note for note in stale_match.assessment.quality_notes)
+    assert not any("älter als 24 Stunden" in note for note in fresh_match.assessment.quality_notes)
+
+
+def _seed_tables(path, updated_at):
+    conn = connect(path)
+    rows = []
+    for league in LEAGUES:
+        for name, points, goals_for, goals_against in (
+            ("Arsenal", 30, 20, 8),
+            ("Liverpool", 22, 16, 10),
+            ("Chelsea", 10, 9, 16),
+            ("Everton", 11, 10, 14),
+        ):
+            rows.append(Standing(league["code"], name, 8, points, goals_for, goals_against))
+    save_standings(conn, rows, updated_at)
+    conn.close()

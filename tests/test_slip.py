@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from valuepulse.models import Assessment, MatchView
+from valuepulse.models import Assessment, BookLine, MatchView
 from valuepulse.slip import build_slip, shortened_warning
 
 
@@ -126,6 +126,38 @@ def test_gesamtquote_und_einsatz_sind_produkt_und_gedeckelter_viertel_kelly():
     assert "Gesamtquote: 3,00" in slip.copy_text
     assert "Gesamt-Wahrscheinlichkeit: 42,0 %" in slip.copy_text
     assert "1,0 % der Bankroll" in slip.copy_text
+
+
+def test_kombi_nimmt_die_beste_quote_eines_buchmachers():
+    first = _match("A", "B", odds=2.40, probability=0.55, edge=0.10)
+    second = _match("C", "D", odds=3.20, probability=0.40, edge=0.08)
+    first.books = (
+        BookLine("Bet365", 1.80, 3.40, 4.20),
+        BookLine("Pinnacle", 2.00, 3.30, 4.00),
+    )
+    second.books = (
+        BookLine("Bet365", 1.90, 3.40, 4.00),
+        BookLine("Pinnacle", 1.70, 3.50, 4.40),
+        BookLine("Unibet", 3.20, 3.10, 2.40),
+    )
+    slip = build_slip([first, second], count=2, risk="hoch")
+    assert slip.bookmaker == "Bet365"
+    assert [leg.odds for leg in slip.legs] == [1.80, 1.90]
+    assert abs(slip.combined_odds - 3.42) < 1e-9
+    assert "Buchmacher: Bet365" in slip.copy_text
+    assert slip.shortened is False
+
+
+def test_ohne_gemeinsamen_buchmacher_wird_der_schein_gekuerzt():
+    first = _match("A", "B", edge=0.12, odds=2.2)
+    second = _match("C", "D", edge=0.08, odds=2.4)
+    first.books = (BookLine("Unibet", 2.2, 3.2, 3.4),)
+    second.books = (BookLine("Bet365", 2.4, 3.3, 3.1),)
+    slip = build_slip([first, second], count=2, risk="hoch")
+    assert [(leg.home, leg.odds) for leg in slip.legs] == [("A", 2.2)]
+    assert slip.bookmaker == "Unibet"
+    assert slip.shortened
+    assert "derselbe Buchmacher" in slip.warning
 
 
 def test_anzahl_wird_auf_zwei_bis_zehn_begrenzt():

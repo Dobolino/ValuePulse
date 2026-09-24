@@ -47,6 +47,7 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
   American Football und Darts sind vorbereitet und noch ohne eigene Spiele.
   Esports ist nicht enthalten.
 - **Strategie & Tippschein:** baut aus den Value-Signalen einen Schein.
+  Die Kombi nimmt nur Quoten eines Buchmachers und nennt ihn.
   Die Ansicht **Pro** zeigt Poisson-Matrix, Marge, Shin, Power und Viertel-Kelly.
   Fehlen Spiele, erscheint **Spielschein gekürzt**.
 - **Positionen:** gespeicherte Tipps, Gewinn und Verlust, Gewinnrate und ROI.

@@ -24,6 +24,17 @@ class Standing:
     points: int
     goals_for: int
     goals_against: int
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class BookLine:
+    """1X2-Quote eines einzelnen Buchmachers für ein Spiel."""
+
+    bookmaker: str
+    home: float
+    draw: float
+    away: float
 
 
 @dataclass
@@ -67,6 +78,7 @@ class MatchView:
     home: str
     away: str
     assessment: Assessment
+    books: tuple[BookLine, ...] = ()
 
 
 @dataclass

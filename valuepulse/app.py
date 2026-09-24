@@ -695,6 +695,8 @@ def _show_slip(slip: Slip) -> None:
         for leg in slip.legs
     ]
     st.markdown(_html_table(pd.DataFrame(rows)), unsafe_allow_html=True)
+    if slip.bookmaker:
+        st.markdown(f"**Spielbar bei:** {html.escape(slip.bookmaker)}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Gesamtquote", decimal_de(slip.combined_odds or 0.0))
     c2.metric("Gesamt-Wahrscheinlichkeit", pct(slip.combined_probability or 0.0))

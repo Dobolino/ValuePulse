@@ -1,7 +1,10 @@
+import sqlite3
+import pytest
 from datetime import datetime, timedelta, timezone
 
-from valuepulse.db import connect, delete_old_snapshots, latest_quotes, save_quotes
+from valuepulse.db import LOCK_WAIT_SECONDS, connect, delete_old_snapshots, latest_quotes, save_quotes
 from valuepulse.models import Quote
+from valuepulse.positions import add_position, list_positions
 
 
 def _quote() -> Quote:
@@ -56,6 +59,36 @@ def test_fremdes_schema_wird_ersetzt(tmp_path):
     version = healed.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()["value"]
     healed.close()
     assert version == "1"
+
+
+def test_datenbank_sperre_loescht_die_datei_nicht(tmp_path, monkeypatch):
+    path = tmp_path / "valuepulse.sqlite3"
+    holder = connect(path)
+    add_position(
+        holder,
+        sport="football",
+        competition="Premier League",
+        match_label="Arsenal – Chelsea",
+        kickoff="2026-09-26T14:00:00+00:00",
+        pick_label="Heimsieg",
+        odds=2.0,
+        probability=0.55,
+        stake=1.0,
+    )
+    holder.execute("BEGIN EXCLUSIVE")
+    sleeps = []
+    monkeypatch.setattr("valuepulse.db.time.sleep", lambda seconds: sleeps.append(seconds))
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            connect(path, timeout=0)
+    finally:
+        holder.rollback()
+    assert sleeps == [LOCK_WAIT_SECONDS, LOCK_WAIT_SECONDS]
+    assert not list(tmp_path.glob("*.bak"))
+    again = connect(path)
+    assert len(list_positions(again)) == 1
+    again.close()
+    holder.close()
 
 
 def test_snapshots_aelter_als_90_tage_werden_geloescht(tmp_path):
