@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
-from valuepulse.config import LEAGUES, STANDINGS_TTL_HOURS, Settings, load_settings
+from valuepulse.config import LEAGUES, LOOKAHEAD_DAYS, STANDINGS_TTL_HOURS, Settings, load_settings
 from valuepulse.db import connect, latest_quotes, load_standings, save_quotes, save_standings
 from valuepulse.demo import build_demo
 from valuepulse.model import assess, strength_from_table
@@ -139,9 +139,10 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
         standings.extend(row for row in cached_standings if row.competition_code not in fresh_codes)
 
     odds_outside = 0
+    later_quotes: list[Quote] = []
     for league in LEAGUES:
         try:
-            batch, remaining, outside = fetch_odds(
+            batch, later, remaining, outside = fetch_odds(
                 client,
                 settings.odds_key,
                 league,
@@ -150,6 +151,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
                 fetched_at=now,
             )
             quotes.extend(batch)
+            later_quotes.extend(later)
             odds_outside += outside
             if remaining is not None:
                 odds_remaining = remaining
@@ -164,6 +166,14 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             warnings.append(f"{league['name']}: Quoten nicht ladbar ({exc}).")
 
     used_cache = False
+    used_next = False
+    if not quotes and later_quotes:
+        quotes = _next_quotes(later_quotes, window)
+        used_next = bool(quotes)
+        if used_next:
+            window = _window_covering(quotes)
+            fixtures = []
+            warnings.append(_next_games_message(quotes))
     if quotes:
         save_quotes(conn, quotes, now)
     else:
@@ -203,7 +213,10 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     if not matches:
         return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.", window)
 
-    if football_limited and quotes and not used_cache:
+    if used_next:
+        mode = "eingeschraenkt"
+        banner = _next_games_message(quotes)
+    elif football_limited and quotes and not used_cache:
         mode = "eingeschraenkt"
         banner = (
             "Football-Data hat das Abruf-Limit erreicht (HTTP 429). "
@@ -422,6 +435,34 @@ def _swap_quote(quote: Quote) -> Quote:
         away_odds=quote.home_odds,
         last_update=quote.last_update,
         source=quote.source,
+    )
+
+
+def _next_quotes(quotes: list[Quote], window: Window) -> list[Quote]:
+    """Nächste lesbare Quoten, wenn im gewählten Zeitraum nichts liegt."""
+    start = _utc_start(window)
+    upcoming = [quote for quote in quotes if quote.kickoff >= start]
+    if not upcoming:
+        return []
+    earliest = min(quote.kickoff for quote in upcoming)
+    horizon = earliest + timedelta(days=LOOKAHEAD_DAYS)
+    return [quote for quote in upcoming if quote.kickoff <= horizon]
+
+
+def _window_covering(quotes: list[Quote]) -> Window:
+    days = [quote.kickoff.astimezone(BERLIN).date() for quote in quotes]
+    return Window(min(days), max(days))
+
+
+def _next_games_message(quotes: list[Quote]) -> str:
+    days = sorted({quote.kickoff.astimezone(BERLIN).date() for quote in quotes})
+    first = days[0].strftime("%d.%m.%Y")
+    last = days[-1].strftime("%d.%m.%Y")
+    span = first if first == last else f"{first} bis {last}"
+    return (
+        "Im gewählten Zeitraum liegt kein Spiel der großen Ligen. "
+        f"The Odds API hat spätere Spiele geliefert ({span}). "
+        "Diese Quoten sind in valuepulse.sqlite3 gespeichert und werden angezeigt."
     )
 
 

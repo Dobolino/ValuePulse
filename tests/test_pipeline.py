@@ -236,6 +236,29 @@ def test_ohne_quoten_faellt_auf_demo_zurueck(tmp_path):
     _assert_demo_fallback(data, "keine lesbare 1X2-Quote")
 
 
+def test_spaetere_quoten_werden_gezeigt_und_gespeichert(tmp_path):
+    from valuepulse.db import connect, latest_quotes
+
+    later = (NOW + timedelta(days=10)).replace(microsecond=0)
+    payload = _odds_payload()
+    payload[0]["commence_time"] = later.isoformat().replace("+00:00", "Z")
+    path = tmp_path / "valuepulse.sqlite3"
+    data = run(
+        Settings("fd-key", "odds-key", path),
+        client=FakeClient(matches=[], odds=payload),
+        now=NOW,
+    )
+    assert data.mode != "demo"
+    assert any(match.home == "Arsenal" for match in data.matches)
+    assert "gespeichert" in data.banner
+    assert "kein Spiel" in data.banner
+    conn = connect(path)
+    stored = latest_quotes(conn)
+    conn.close()
+    assert stored
+    assert stored[0].home == "Arsenal"
+
+
 def test_ohne_spiele_im_zeitfenster_faellt_auf_demo_zurueck(tmp_path):
     from valuepulse.db import connect, save_quotes
     from valuepulse.models import Quote

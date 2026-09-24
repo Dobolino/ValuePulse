@@ -1,7 +1,7 @@
 import os
 from datetime import date
 
-from valuepulse.config import Settings, save_env_keys
+from valuepulse.config import Settings, masked_key, save_env_keys
 from valuepulse.pipeline import run
 from valuepulse.providers import check_api_keys
 from valuepulse.window import BERLIN
@@ -26,6 +26,12 @@ class _Client:
         if "the-odds-api" in url:
             return _Response(self.odds_status, [])
         return _Response(200, {"name": "Premier League"})
+
+
+def test_gespeicherter_schluessel_ist_am_ende_sichtbar():
+    assert masked_key("") == "nicht gespeichert"
+    assert masked_key("abcd") == "gespeichert"
+    assert masked_key("odds-live-key-91xz") == "gespeichert, endet auf 91xz"
 
 
 def test_schluessel_werden_lokal_gespeichert(tmp_path):

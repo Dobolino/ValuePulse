@@ -54,6 +54,8 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
   Nach dem Spiel trägst du Gewonnen, Verloren oder Storniert ein.
 - **Kalender:** Monatsansicht. Ein Tag setzt nur den Zeitraum.
   Erst **Spiele für gewählten Zeitraum berechnen** startet die Analyse.
+  Liegt in dem Zeitraum kein Spiel, zeigt das Dashboard die nächsten
+  Spiele, die The Odds API geliefert hat, und speichert die Quoten.
 - **Einstellungen:** Football-Data- und Odds-API-Schlüssel eintragen und mit
   **Schlüssel lokal speichern** sichern.
 - **Hilfe:** diese Anleitung.

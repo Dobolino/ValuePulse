@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from valuepulse.config import LOOKAHEAD_DAYS, load_settings, save_env_keys
+from valuepulse.config import LOOKAHEAD_DAYS, load_settings, masked_key, save_env_keys
 from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
@@ -506,14 +506,16 @@ def _render_settings() -> None:
     )
     current = load_settings()
     if current.has_live_keys:
-        st.success("Beide Schlüssel sind gespeichert. Ob sie gültig sind, steht nach dem Speichern darunter.")
+        st.success("Beide Schlüssel stehen in der Datei .env auf diesem Rechner.")
     else:
         st.warning("Demo-Modus ist aktiv. Es fehlt mindestens ein Schlüssel.")
     if st.session_state.get("key_status"):
         st.info(st.session_state.key_status)
 
     st.text_input("Football-Data API Key", type="password", key="form_fd")
+    st.caption(f"Football-Data in .env: {masked_key(current.football_key)}")
     st.text_input("The Odds API Key", type="password", key="form_odds")
+    st.caption(f"The Odds API in .env: {masked_key(current.odds_key)}")
     st.caption("Kostenlose Schlüssel: football-data.org und the-odds-api.com.")
     if st.button("Schlüssel lokal speichern", type="primary"):
         football = str(st.session_state.get("form_fd", "")).strip()
@@ -767,8 +769,9 @@ def _key_message(checked: dict[str, str]) -> str:
     odds = _CHECK_TEXT.get(checked.get("odds", ""), "ungeprüft")
     if checked.get("football") == "gültig" and checked.get("odds") == "gültig":
         return (
-            "Beide Schlüssel sind gültig. Der Demo-Modus ist aus. "
-            "Im Dashboard auf „Daten aktualisieren“ oder im Kalender auf „Spiele suchen & berechnen“ klicken."
+            "Beide Schlüssel sind gültig und in .env gespeichert. "
+            "Im Dashboard auf „Daten aktualisieren“ klicken. "
+            "Liegt im gewählten Zeitraum kein Spiel, werden die nächsten gelieferten Spiele gezeigt."
         )
     if "fehlt" in (checked.get("football"), checked.get("odds")):
         return "Gespeichert. Der Demo-Modus bleibt aktiv, weil mindestens ein Schlüssel fehlt."

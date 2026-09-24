@@ -66,6 +66,16 @@ class Settings:
         return self.has_football_key and self.has_odds_key
 
 
+def masked_key(value: str) -> str:
+    """Sichtbarer Hinweis, ohne den ganzen Schlüssel zu zeigen."""
+    text = (value or "").strip()
+    if not text:
+        return "nicht gespeichert"
+    if len(text) <= 4:
+        return "gespeichert"
+    return f"gespeichert, endet auf {text[-4:]}"
+
+
 def _clean_key(value: str | None) -> str:
     text = (value or "").strip().strip('"').strip("'")
     if text.lower() in _PLACEHOLDERS:

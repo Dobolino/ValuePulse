@@ -165,12 +165,13 @@ def fetch_odds(
     window_start: datetime,
     window_end: datetime,
     fetched_at: datetime,
-) -> tuple[list[Quote], int | None, int]:
+) -> tuple[list[Quote], list[Quote], int | None, int]:
     """Lädt 1X2-Quoten. Europa zuerst, Großbritannien nur wenn dort keine Quote lesbar ist.
 
-    Der dritte Wert zählt Spiele, die außerhalb des gewählten Zeitraums lagen.
+    Der zweite Wert sind lesbare Quoten nach dem Zeitraum. Der vierte zählt
+    Spiele, die außerhalb lagen.
     """
-    quotes, remaining, outside = _fetch_odds_region(
+    quotes, later, remaining, outside = _fetch_odds_region(
         client,
         api_key,
         league,
@@ -179,9 +180,9 @@ def fetch_odds(
         window_end=window_end,
         fetched_at=fetched_at,
     )
-    if quotes or outside:
-        return quotes, remaining, outside
-    uk_quotes, uk_remaining, uk_outside = _fetch_odds_region(
+    if quotes or later or outside:
+        return quotes, later, remaining, outside
+    uk_quotes, uk_later, uk_remaining, uk_outside = _fetch_odds_region(
         client,
         api_key,
         league,
@@ -192,7 +193,7 @@ def fetch_odds(
     )
     if uk_remaining is not None:
         remaining = uk_remaining
-    return uk_quotes, remaining, outside + uk_outside
+    return uk_quotes, uk_later, remaining, outside + uk_outside
 
 
 def _fetch_odds_region(
@@ -204,7 +205,7 @@ def _fetch_odds_region(
     window_start: datetime,
     window_end: datetime,
     fetched_at: datetime,
-) -> tuple[list[Quote], int | None, int]:
+) -> tuple[list[Quote], list[Quote], int | None, int]:
     payload, headers = _request_json(
         client,
         f"{ODDS_API_BASE}/sports/{league['sport']}/odds",
@@ -222,6 +223,7 @@ def _fetch_odds_region(
         raise ProviderError("Die Quoten-API lieferte ein unerwartetes Format.")
 
     quotes: list[Quote] = []
+    later: list[Quote] = []
     outside = 0
     for event in payload:
         if not isinstance(event, dict):
@@ -233,12 +235,11 @@ def _fetch_odds_region(
             continue
         if kickoff < window_start or kickoff > window_end:
             outside += 1
+            if kickoff > window_end:
+                later.extend(_quotes_for_event(event, league, kickoff, str(home), str(away), fetched_at))
             continue
-        for book in event.get("bookmakers") or []:
-            quote = _quote_from_book(book, league["name"], kickoff, str(home), str(away), fetched_at)
-            if quote is not None:
-                quotes.append(quote)
-    return quotes, remaining, outside
+        quotes.extend(_quotes_for_event(event, league, kickoff, str(home), str(away), fetched_at))
+    return quotes, later, remaining, outside
 
 
 def _minute_budget(headers: Any) -> int | None:
@@ -266,6 +267,22 @@ def _remaining(headers: Any) -> int | None:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _quotes_for_event(
+    event: dict,
+    league: dict,
+    kickoff: datetime,
+    home: str,
+    away: str,
+    fetched_at: datetime,
+) -> list[Quote]:
+    quotes: list[Quote] = []
+    for book in event.get("bookmakers") or []:
+        quote = _quote_from_book(book, league["name"], kickoff, home, away, fetched_at)
+        if quote is not None:
+            quotes.append(quote)
+    return quotes
 
 
 def _quote_from_book(
