@@ -184,27 +184,27 @@ def main() -> None:
     st.title("ValuePulse")
     st.caption("Modell gegen Buchmacher. Ein Value-Signal beginnt bei einem Edge über 3 %.")
 
-    dashboard, calendar, settings, pro, slip_tab, help_tab = st.tabs(
+    dashboard, pro, slip_tab, calendar, settings, help_tab = st.tabs(
         [
-            "📊 Dashboard (Live & Signale)",
-            "🗓️ Datums-Filter (Kalender)",
-            "⚙️ Einstellungen (API-Keys)",
-            "💎 Pro-Version (Erweiterte Metriken)",
+            "📊 Dashboard",
+            "💎 Pro",
             "🎟️ Tippschein",
-            "❓ Hilfe & Anleitung",
+            "🗓️ Datum",
+            "⚙️ Einstellungen",
+            "❓ Hilfe",
         ]
     )
     data = _data()
     with dashboard:
         _render_dashboard(data)
-    with calendar:
-        _render_calendar()
-    with settings:
-        _render_settings()
     with pro:
         _render_pro(data)
     with slip_tab:
         _render_slip(data)
+    with calendar:
+        _render_calendar()
+    with settings:
+        _render_settings()
     with help_tab:
         st.markdown(HELP_MARKDOWN)
 
