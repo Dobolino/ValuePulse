@@ -87,6 +87,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     fresh_codes = {code for code, rows in cached_by_code.items() if _standings_fresh(rows, now)}
 
     for league in LEAGUES:
+        if league.get("fixtures") is False:
+            continue
         if football_budget is not None and football_budget < 1:
             football_limited = True
             warnings.append("Football-Data: Das Minutenlimit ist erreicht, weitere Ligen warten.")
@@ -114,6 +116,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     # schon eng ist. Eine gespeicherte Tabelle reicht, sonst rechnet das Modell neutral.
     if not football_limited:
         for league in LEAGUES:
+            if league.get("fixtures") is False:
+                continue
             if league["code"] in fresh_codes:
                 continue
             if football_budget is not None and football_budget < 1:
@@ -163,6 +167,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             warnings.append("The Odds API hat den Schlüssel abgelehnt.")
             break
         except ProviderError as exc:
+            if league.get("fixtures") is False and exc.status == 404:
+                continue
             warnings.append(f"{league['name']}: Quoten nicht ladbar ({exc}).")
 
     used_cache = False
@@ -198,6 +204,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             warnings.append("Die Spielleiste kommt aus den Quoten, nicht aus Football-Data.")
         else:
             return _safe_demo(now, "Weder Live-Spiele noch gespeicherte Quoten im Zeitfenster.", window)
+    else:
+        fixtures = _with_quote_only_matches(fixtures, quotes, window)
 
     if not standings:
         standings = load_standings(conn)
@@ -279,6 +287,28 @@ def _from_demo(now: datetime, reason: str, window: Window) -> DashboardData:
         warnings=[],
         generated_at=now,
     )
+
+
+def _with_quote_only_matches(
+    fixtures: list[Fixture],
+    quotes: list[Quote],
+    window: Window,
+) -> list[Fixture]:
+    """Hängt Spiele an, die nur in den Quoten stehen, etwa Nations League oder WM."""
+    combined = list(fixtures)
+    for candidate in _fixtures_from_quotes(quotes, window):
+        if any(_same_fixture(existing, candidate) for existing in combined):
+            continue
+        combined.append(candidate)
+    return combined
+
+
+def _same_fixture(left: Fixture, right: Fixture) -> bool:
+    if abs((left.kickoff - right.kickoff).total_seconds()) > _MATCH_WINDOW_SECONDS:
+        return False
+    direct = names_match(left.home, right.home) and names_match(left.away, right.away)
+    swapped = names_match(left.home, right.away) and names_match(left.away, right.home)
+    return direct or swapped
 
 
 def _fixtures_from_quotes(quotes: list[Quote], window: Window) -> list[Fixture]:

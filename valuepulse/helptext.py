@@ -43,9 +43,11 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
 
 - **Dashboard:** die Ampel und die Begründung zu jedem Spiel.
   Bei einem Signal kannst du **+ Tipp zu Positionen hinzufügen**.
-- **Sportarten:** Fußball ist aktiv. Tennis, Basketball, Baseball, UFC,
-  American Football und Darts sind vorbereitet und noch ohne eigene Spiele.
-  Esports ist nicht enthalten.
+- **Sportarten:** Fußball ist aktiv. Dazu die Premier League, Bundesliga,
+  La Liga, Serie A, Ligue 1, Weltmeisterschaft, Europameisterschaft,
+  Nations League, WM-Qualifikation und EM-Qualifikation.
+  Tennis, Basketball, Baseball, UFC, American Football und Darts sind
+  vorbereitet und noch ohne eigene Spiele. Esports ist nicht enthalten.
 - **Strategie & Tippschein:** baut aus den Value-Signalen einen Schein.
   Die Kombi nimmt nur Quoten eines Buchmachers und nennt ihn.
   Die Ansicht **Pro** zeigt Poisson-Matrix, Marge, Shin, Power und Viertel-Kelly.

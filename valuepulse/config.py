@@ -26,12 +26,19 @@ STANDINGS_TTL_HOURS = 24
 # Nur Spiele in diesem Fenster landen im Dashboard.
 LOOKAHEAD_DAYS = 7
 
+# fixtures=False: kein Ligaspielplan bei Football-Data. Die Spiele kommen aus
+# den Quoten. Diese Wettbewerbe haben dort auch keine Gesamttabelle.
 LEAGUES = (
     {"code": "PL", "sport": "soccer_epl", "name": "Premier League"},
     {"code": "BL1", "sport": "soccer_germany_bundesliga", "name": "Bundesliga"},
     {"code": "PD", "sport": "soccer_spain_la_liga", "name": "La Liga"},
     {"code": "SA", "sport": "soccer_italy_serie_a", "name": "Serie A"},
     {"code": "FL1", "sport": "soccer_france_ligue_one", "name": "Ligue 1"},
+    {"code": "WC", "sport": "soccer_fifa_world_cup", "name": "Weltmeisterschaft", "fixtures": False},
+    {"code": "EC", "sport": "soccer_uefa_european_championship", "name": "Europameisterschaft", "fixtures": False},
+    {"code": "UNL", "sport": "soccer_uefa_nations_league", "name": "Nations League", "fixtures": False},
+    {"code": "QUFA", "sport": "soccer_fifa_world_cup_qualifiers_europe", "name": "WM-Qualifikation", "fixtures": False},
+    {"code": "ECQ", "sport": "soccer_uefa_euro_qualification", "name": "EM-Qualifikation", "fixtures": False},
 )
 
 FOOTBALL_DATA_BASE = "https://api.football-data.org/v4"

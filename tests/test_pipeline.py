@@ -325,12 +325,67 @@ def test_ohne_zuordnung_faellt_auf_demo_zurueck(tmp_path):
         client=FakeClient(odds=odds),
         now=NOW,
     )
-    _assert_demo_fallback(data, "keinem gemeinsamen Spiel")
+    assert data.mode != "demo"
+    assert any(match.home == "Bayern Munich" and match.away == "Borussia Dortmund" for match in data.matches)
+    assert all(match.home != "Arsenal FC" for match in data.matches)
 
 
 def test_ligen_sind_die_grossen_fuenf():
     codes = set(league_by_code())
-    assert codes == {"PL", "BL1", "PD", "SA", "FL1"}
+    assert {"PL", "BL1", "PD", "SA", "FL1", "WC", "EC", "UNL", "QUFA", "ECQ"} <= codes
+    assert league_by_code()["UNL"]["name"] == "Nations League"
+    assert league_by_code()["WC"]["sport"] == "soccer_fifa_world_cup"
+    assert league_by_code()["ECQ"]["name"] == "EM-Qualifikation"
+
+
+def test_nations_league_wird_neben_den_ligen_gezeigt(tmp_path):
+    kickoff = (NOW + timedelta(days=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    nations = [
+        {
+            "id": "unl",
+            "commence_time": kickoff,
+            "home_team": "Germany",
+            "away_team": "France",
+            "bookmakers": [
+                {
+                    "key": "pinnacle",
+                    "title": "Pinnacle",
+                    "last_update": NOW.isoformat().replace("+00:00", "Z"),
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": "Germany", "price": 2.20},
+                                {"name": "Draw", "price": 3.30},
+                                {"name": "France", "price": 3.40},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    class SportClient(FakeClient):
+        def get(self, url, *, headers, params, timeout):
+            if "/odds" in url and "world_cup" in url and "qualifiers" not in url:
+                self.calls += 1
+                self.params.append(params)
+                self.urls.append(url)
+                return FakeResponse({"message": "Unknown sport"}, status=404)
+            if "/odds" in url and "nations_league" in url:
+                self.odds = nations
+            elif "/odds" in url:
+                self.odds = _odds_payload()
+            return super().get(url, headers=headers, params=params, timeout=timeout)
+
+    data = run(Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"), client=SportClient(), now=NOW)
+    assert any(match.home == "Arsenal FC" for match in data.matches)
+    nations_match = next(match for match in data.matches if match.home == "Germany")
+    assert nations_match.away == "France"
+    assert nations_match.competition == "Nations League"
+    assert "Weltmeisterschaft" not in data.banner
+    assert not any("Weltmeisterschaft" in note for note in data.warnings)
 
 
 def test_frische_tabelle_wird_nicht_erneut_geholt(tmp_path):
