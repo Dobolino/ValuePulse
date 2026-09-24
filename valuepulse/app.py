@@ -68,8 +68,10 @@ _CSS = """
         border: 1px solid transparent;
         color: #d5dde6;
     }
+    .main .block-container,
     [data-testid="stMain"] .block-container {
-        padding-top: 2.4rem;
+        /* 2rem sits under the 60px top bar. 4.5rem starts the title below it. */
+        padding-top: 4.5rem !important;
         padding-bottom: 3.5rem;
         padding-left: 1.6rem;
         padding-right: 1.6rem;
@@ -737,7 +739,7 @@ def _render_pro(data: DashboardData) -> None:
     item = match.assessment
     c1, c2, c3 = st.columns(3)
     c1.metric("Marge der besten Quoten", pct(view.margin))
-    c2.metric(f"Edge {item.pick_label}", pct(item.edge))
+    c2.metric(f"Edge (EV) {item.pick_label}", pct(view.edge_raw[item.pick]))
     c3.metric("Empfohlener Max-Einsatz", pct(view.recommended_stake[item.pick]))
     if view.margin < 0:
         st.caption(
@@ -831,10 +833,9 @@ def _pro_table(item, view) -> str:
                 "Modell": pct(item.model_probs[key], 0),
                 "Quote": decimal_de(item.odds[key]),
                 "Roh": pct(1.0 / item.odds[key], 0),
-                "Shin": pct(view.shin[key], 0),
+                "Fair (Shin)": pct(view.shin[key], 0),
                 "Power": pct(view.power[key], 0),
-                "Edge roh": pct(view.edge_raw[key]),
-                "Edge Shin": pct(view.edge_shin[key]),
+                "Edge (EV)": pct(view.edge_raw[key]),
                 "Max-Einsatz": pct(view.recommended_stake[key]),
             }
         )

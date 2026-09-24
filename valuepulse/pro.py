@@ -34,6 +34,16 @@ def bookmaker_margin(odds: list[float]) -> float:
     return sum(1.0 / decimal_odd for decimal_odd in odds) - 1.0
 
 
+def expected_value(probability: float, decimal_odds: float) -> float:
+    """Erwartungswert: Modellwahrscheinlichkeit mal Dezimalquote, minus 1.
+
+    Bei 49 % und Quote 2,90 ist das (0,49 × 2,90) − 1 = +42,1 %.
+    """
+    if decimal_odds <= 0:
+        return -1.0
+    return probability * decimal_odds - 1.0
+
+
 def kelly_fraction(probability: float, decimal_odds: float) -> float:
     """Voller Kelly-Anteil des Budgets. Negativ wird zu 0."""
     net_odds = decimal_odds - 1.0
@@ -122,8 +132,11 @@ def build_pro_view(item: Assessment) -> ProView:
     odds = [item.odds[key] for key in _OUTCOMES]
     shin = shin_probabilities(odds)
     power = power_probabilities(odds)
-    edge_raw = {key: item.model_probs[key] - (1.0 / item.odds[key]) for key in _OUTCOMES}
-    edge_shin = {key: item.model_probs[key] - shin[key] for key in _OUTCOMES}
+    edge_raw = {key: expected_value(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
+    edge_shin = {
+        key: expected_value(item.model_probs[key], 1.0 / shin[key]) if shin[key] > 0 else -1.0
+        for key in _OUTCOMES
+    }
     kelly = {key: kelly_fraction(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
     recommended = {key: fractional_kelly(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
     if item.home_xg is None or item.away_xg is None:
