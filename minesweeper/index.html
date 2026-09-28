@@ -53,6 +53,7 @@
 html,body{background:var(--bg);color:var(--ink)}
 body{margin:0;font:15px/1.5 var(--body);-webkit-font-smoothing:antialiased}
 [hidden]{display:none!important}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 button{font:inherit;color:inherit}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
@@ -66,7 +67,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 .tagline{margin:0;color:var(--muted);max-width:52ch;text-wrap:balance}
 
 .modes{grid-area:modes;display:grid;gap:12px}
-.mode-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.mode-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 .mode{appearance:none;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:10px;
   padding:10px 12px;display:grid;gap:3px;align-content:start;cursor:pointer;transition:border-color .15s,background-color .15s}
 .mode:hover{border-color:var(--muted)}
@@ -155,6 +156,36 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 @keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
 @keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
 .foot-info{margin:0;font-size:13px;color:var(--muted)}
+.head-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.wallet{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font:700 17px var(--mono);font-variant-numeric:tabular-nums}
+.wallet.bump{animation:bump .35s ease-out}
+.coin{display:inline-block;flex:none;width:20px;height:20px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFEBA8,#E8B53A 55%,#A87314);box-shadow:inset 0 0 0 2px rgba(110,70,10,.35)}
+.coin.sm{width:14px;height:14px}
+@keyframes bump{40%{transform:scale(1.12)}}
+.coin-pop{position:fixed;z-index:60;pointer-events:none;display:flex;align-items:center;gap:4px;font:700 14px var(--mono);color:#C98F1E;animation:rise .9s ease-out forwards}
+@keyframes rise{to{transform:translateY(-38px);opacity:0}}
+.fusebar{display:block;height:3px;border-radius:2px;background:var(--line);margin-top:3px;overflow:hidden}
+.fusebar i{display:block;height:100%;width:100%;background:var(--accent);transform-origin:left}
+.powers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.power{appearance:none;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;min-height:42px}
+.power b{font-size:13.5px;flex:1}
+.power span{font:600 12px var(--mono);color:var(--muted)}
+.power kbd{font:500 11px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.power[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.power:disabled{opacity:.45;cursor:not-allowed}
+.shop{display:grid;gap:8px}
+.item{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;padding:8px 10px;border-radius:8px;background:var(--bg)}
+.item b{font-size:14px}
+.item small{font-size:12px;color:var(--muted);line-height:1.35}
+.item .own{font:500 11.5px var(--mono);color:var(--muted)}
+.item .btn{grid-column:2;grid-row:1 / span 3;min-height:34px;padding:5px 10px;font-size:13px}
+.board.armed .cell:not(.open){cursor:crosshair}
+.board.armed .cell:not(.open):hover{box-shadow:inset 0 0 0 2px var(--accent)}
+.cell.peek{box-shadow:inset 0 0 0 2px #3C9AD0}
+.cell.peek-mine::after{content:"";width:60%;height:60%;-webkit-mask:var(--mine-mask) center/contain no-repeat;mask:var(--mine-mask) center/contain no-repeat;background:var(--boom)}
+.cell.peek-safe::before{content:attr(data-peek);position:absolute;inset:0;display:grid;place-items:center;color:#3C9AD0;opacity:.9}
+.cell.mine.defused{background:var(--good-bg)}
+.cell.mine.defused::after{background:var(--good)}
 .fx{position:fixed;inset:0;pointer-events:none;z-index:50}
 .board .cell.gone{background:radial-gradient(circle,#050302 0 28%,#2A1508 58%,var(--grid) 100%);box-shadow:none;color:transparent;animation:none}
 .board .cell.gone::before,.board .cell.gone::after{content:none}
@@ -186,6 +217,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 .keys span{color:var(--muted)}
 .card p{margin:0;font-size:13px;color:var(--muted)}
 
+@media (max-width:1100px){ .mode-grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
 @media (max-width:980px){
   .app{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "modes" "stage" "side"}
   .side{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
@@ -197,6 +229,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
   .actions{margin-left:0;width:100%}
   .actions .btn{flex:1;justify-content:center}
   .stat{flex:1;min-width:0}
+  .powers{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
@@ -210,7 +243,10 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
       <div class="brand-mark" aria-hidden="true"><i></i></div>
       <h1>Minenfeld</h1>
     </div>
-    <p class="tagline">Fünf Modi. Der erste Klick ist immer sicher. Deine Bestzeiten bleiben in diesem Browser.</p>
+    <div class="head-right">
+      <p class="tagline">Sieben Modi. Münzen und Power-ups im Arcade-Modus. Deine Bestzeiten bleiben in diesem Browser.</p>
+      <div class="wallet" id="wallet" title="Deine Münzen"><i class="coin" aria-hidden="true"></i><b id="coinBal">0</b><span class="visually-hidden"> Münzen</span></div>
+    </div>
   </header>
 
   <section class="modes" aria-label="Spielmodus und Schwierigkeit">
@@ -229,6 +265,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
     <div class="hud">
       <div class="stat"><span class="label">Minen</span><span class="val" id="mineCount">10</span></div>
       <div class="stat"><span class="label" id="timeLabel">Zeit</span><span class="val" id="timer">0.0</span></div>
+      <div class="stat" id="fuseStat" hidden><span class="label">Zündschnur</span><span class="val" id="fuse">10.0</span><span class="fusebar"><i id="fuseBar"></i></span></div>
       <div class="stat" id="livesStat" hidden><span class="label">Leben</span><span class="lives" id="lives"></span></div>
       <div class="actions">
         <button class="btn" id="flagBtn" type="button" aria-pressed="false" title="Flaggen-Modus für Touch (F)"><span class="ico" aria-hidden="true"></span>Flagge</button>
@@ -236,6 +273,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
         <button class="btn primary" id="newBtn" type="button" title="Neues Feld (N)">Neues Feld</button>
       </div>
     </div>
+    <div class="powers" id="powerBar" hidden></div>
     <div class="status" id="status" role="status" aria-live="polite"></div>
     <div class="board-wrap" id="wrap">
       <div class="board" id="board" role="grid" aria-label="Minenfeld"></div>
@@ -244,6 +282,11 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
   </main>
 
   <aside class="side">
+    <section class="card">
+      <h2>Laden</h2>
+      <div class="shop" id="shop"></div>
+      <p class="small">Münzen gibt es in allen Modi ausser Klassisch. Power-ups setzt du im Modus Arcade ein.</p>
+    </section>
     <section class="card">
       <h2>Einstellungen</h2>
       <div class="setting">
@@ -286,6 +329,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
         <li><kbd>Klick auf Zahl</kbd><span>Nachbarn aufdecken, wenn die Flaggen stimmen</span></li>
         <li><kbd>Pfeile · Leer</kbd><span>Feld wählen und aufdecken</span></li>
         <li><kbd>F · H · N</kbd><span>Flagge, Tipp, neues Feld</span></li>
+        <li><kbd>1 bis 4</kbd><span>Power-ups im Arcade-Modus</span></li>
       </ul>
     </section>
     <section class="card">
@@ -309,7 +353,18 @@ const MODES = {
   logic:   { label: "Ohne Raten", short: "Jedes Feld ist rein logisch lösbar.", info: "Ohne Raten: Das Spiel erzeugt nur Felder, die du vom ersten Klick an ohne 50:50 lösen kannst." },
   timed:   { label: "Zeitdruck",  short: "Die Uhr läuft rückwärts.", info: "Zeitdruck: Räum das Feld, bevor die Zeit abläuft. Ein Tipp kostet 10 Sekunden." },
   lives:   { label: "Drei Leben", short: "Eine Mine kostet ein Leben.", info: "Drei Leben: Eine getroffene Mine bleibt markiert und kostet ein Leben. Nach der dritten ist Schluss." },
-  daily:   { label: "Tagesfeld",  short: "Ein Feld pro Tag, für alle gleich.", info: "Tagesfeld: 16 × 16 mit 40 Minen, jeden Tag neu und ohne Raten lösbar. Start beim grünen Punkt." }
+  daily:   { label: "Tagesfeld",  short: "Ein Feld pro Tag, für alle gleich.", info: "Tagesfeld: 16 × 16 mit 40 Minen, jeden Tag neu und ohne Raten lösbar. Start beim grünen Punkt." },
+  hardcore:{ label: "Hardcore",   short: "Mehr Minen, Zündschnur, keine Hilfe.", info: "Hardcore: 25 % mehr Minen, kein Minenzähler, keine Tipps. Der erste Klick schützt nur das Feld selbst. Die Zündschnur brennt: Deck innert 10 Sekunden ein neues Feld auf, sonst geht alles hoch." },
+  arcade:  { label: "Arcade",     short: "Münzen sammeln, Power-ups einsetzen.", info: "Arcade: Unter manchen Feldern liegen Münzen. Kauf im Laden Power-ups und setz sie hier ein, auch mit den Tasten 1 bis 4." }
+};
+const FUSE = 10;
+const COIN_BASE = { beginner: 10, intermediate: 30, expert: 75 };
+const COIN_MULT = { classic: 0, logic: 1, timed: 1.5, lives: 0.8, daily: 2, hardcore: 3, arcade: 1 };
+const POWERS = {
+  defuse: { label: "Entschärfer", price: 15, key: "1", target: true, desc: "Wähl ein verdecktes Feld. Liegt dort eine Mine, ist sie entschärft. Sonst deckst du das Feld sicher auf." },
+  xray:   { label: "Röntgen",     price: 20, key: "2", target: true, desc: "Zeigt dir 3 × 3 Felder für 2 Sekunden." },
+  shield: { label: "Schild",      price: 30, key: "3", desc: "Fängt die nächste Mine ab, die du triffst." },
+  scout:  { label: "Späher",      price: 12, key: "4", desc: "Deckt eine sichere Stelle auf, am liebsten eine freie Fläche." }
 };
 const TIME_LIMIT = { beginner: 45, intermediate: 180, expert: 480 };
 const HINT_COST = 10;
@@ -327,6 +382,9 @@ const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20
 if (!MODES[prefs.mode]) prefs.mode = "classic";
 if (!PRESETS[prefs.diff] && prefs.diff !== "custom") prefs.diff = "beginner";
 const savePrefs = () => store.set("mf:prefs", prefs);
+const wallet = Object.assign({ coins: 25, inv: {} }, store.get("mf:wallet", {}));
+for (const k of Object.keys(POWERS)) wallet.inv[k] = wallet.inv[k] || 0;
+const saveWallet = () => store.set("mf:wallet", wallet);
 
 /* ---------- helpers ---------- */
 function hashStr(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -595,7 +653,14 @@ const Sound = (() => {
     // chord with wrong flag count
     deny() { const a = get(); if (!a) return; const t = a.currentTime; tone(a, t, "sawtooth", 150, 120, 0.12, 0.08); },
     win() { const a = get(); if (!a) return; const t = a.currentTime;
-      [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); }
+      [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); },
+    coin() { const a = get(); if (!a) return; const t = a.currentTime;
+      tone(a, t, "square", 988, 988, 0.07, 0.1); tone(a, t + 0.07, "square", 1319, 1319, 0.18, 0.1); },
+    defuse() { const a = get(); if (!a) return; const t = a.currentTime;
+      noiseHit(a, t, 3000, 3, 0.04, 0.4); tone(a, t + 0.03, "triangle", 900, 420, 0.25, 0.25); },
+    xray() { const a = get(); if (!a) return; tone(a, a.currentTime, "sine", 380, 1700, 0.35, 0.16); },
+    shield() { const a = get(); if (!a) return; const t = a.currentTime;
+      tone(a, t, "triangle", 523, 523, 0.35, 0.18); tone(a, t, "triangle", 784, 784, 0.35, 0.14); tone(a, t + 0.1, "sine", 1047, 1047, 0.3, 0.1); }
   };
   return Object.assign({ boom, unlock: get }, fx);
 })();
@@ -670,7 +735,7 @@ const FX = (() => {
     cells[hit].classList.add("gone");
     blast(hx, hy, S, 1.25);
     const others = [];
-    for (let i = 0; i < N; i++) if (G.mine[i] && i !== hit && G.state[i] !== 3) {
+    for (let i = 0; i < N; i++) if (G.mine[i] && i !== hit && G.state[i] !== 3 && G.state[i] !== 5) {
       const r = rects[i];
       others.push({ i, x: r.left + r.width / 2, y: r.top + r.height / 2, d: Math.hypot(r.left - hr.left, r.top - hr.top) / S });
     }
@@ -820,12 +885,13 @@ const realFx = () => prefs.fx === "real" && motion;
 
 /* ---------- game state ---------- */
 let rebuildTimer = null;
-let G = null, cells = [], focusIdx = 0, timerId = null, genToken = 0, flagMode = false, statusTimer = null;
+let G = null, cells = [], focusIdx = 0, timerId = null, genToken = 0, flagMode = false, statusTimer = null, flashActive = false;
 
 function currentDims() {
   if (prefs.mode === "daily") return { w: 16, h: 16, n: 40 };
-  if (prefs.diff === "custom") return Object.assign({}, prefs.custom);
-  return Object.assign({}, PRESETS[prefs.diff]);
+  const d = Object.assign({}, prefs.diff === "custom" ? prefs.custom : PRESETS[prefs.diff]);
+  if (prefs.mode === "hardcore") d.n = Math.min(Math.round(d.n * 1.25), d.w * d.h - 9);
+  return d;
 }
 function recordKey() { return prefs.mode === "daily" ? "daily" : prefs.diff; }
 
@@ -841,8 +907,10 @@ function newGame() {
     mine: null, adj: null, state: new Uint8Array(w * h),
     started: false, over: false, won: false, generating: false,
     t0: 0, elapsed: 0, penalty: 0, lives: 3, hints: 0, flags: 0, opened: 0,
-    start: -1, bv: 0, limit: 0, fallback: false
+    start: -1, bv: 0, limit: 0, fallback: false,
+    fuseAt: 0, coinCells: null, coinsRun: 0, shield: false, armed: null
   };
+  board.classList.remove("armed");
   if (G.mode === "timed") G.limit = prefs.diff === "custom" ? Math.max(30, Math.round(n * 4.5)) : TIME_LIMIT[prefs.diff];
   if (G.mode === "daily") {
     const d = dailyBoard(w, h, n, G.nb);
@@ -853,6 +921,7 @@ function newGame() {
   updateHud();
   setStatus(G.mode === "daily" ? { kind: "idle", text: "Tagesfeld " + todayKey() + ". Starte beim grünen Punkt." } : { kind: "idle", text: "Klick auf ein beliebiges Feld, um zu starten." });
   $("modeInfo").textContent = MODES[G.mode].info;
+  updatePowerBar();
 }
 
 function renderBoard() {
@@ -892,6 +961,7 @@ function paint(i, anim, delay) {
   else if (s === 2) { cls += " flag"; label += "Flagge"; }
   else if (s === 3) { cls += " open mine boom"; label += "Mine getroffen"; }
   else if (s === 4) { cls += " quest"; txt = "?"; label += "Fragezeichen"; }
+  else if (s === 5) { cls += " open mine defused"; label += "Mine entschärft"; }
   if (anim && motion) { cls += " " + anim; el.style.animationDelay = (delay || 0) + "ms"; }
   el.className = cls; el.textContent = txt; el.setAttribute("aria-label", label);
 }
@@ -900,13 +970,14 @@ function paint(i, anim, delay) {
 function act(i, flagIntent) {
   if (!G || G.over || G.generating) return;
   setFocus(i, false);
+  if (G.armed && !flagIntent) { usePowerOn(i); return; }
   const s = G.state[i];
   if (flagIntent) {
     if (s === 0 || s === 2 || s === 4) toggleFlag(i);
     else if (s === 1) chord(i);
     after(); return;
   }
-  if (s === 2 || s === 3) return;
+  if (s === 2 || s === 3 || s === 5) return;
   if (s === 1) { chord(i); after(); return; }
   if (!G.started) { if (G.mode === "daily") begin(i); else firstClick(i); return; }
   const n = reveal(i);
@@ -928,10 +999,11 @@ function toggleFlag(i) {
 
 function firstClick(i) {
   const ex = new Set([i, ...G.nb[i]]);
-  if (G.w * G.h - G.n < ex.size) { ex.clear(); ex.add(i); }
+  if (G.w * G.h - G.n < ex.size || G.mode === "hardcore") { ex.clear(); ex.add(i); }
   if (G.mode === "logic") { generateNoGuess(i, ex); return; }
   const { mine, adj } = layMines(G.w, G.h, G.n, G.nb, Math.random, ex);
   G.mine = mine; G.adj = adj; G.bv = bbbv(G);
+  if (G.mode === "arcade") placeCoins();
   begin(i);
 }
 
@@ -964,8 +1036,17 @@ function generateNoGuess(i, ex) {
   setTimeout(step, 20);
 }
 
+// Arcade: about 6 % of the safe cells hide a coin.
+function placeCoins() {
+  const safe = [];
+  for (let i = 0; i < G.w * G.h; i++) if (!G.mine[i]) safe.push(i);
+  const n = Math.max(3, Math.round(safe.length * 0.06));
+  G.coinCells = new Set();
+  while (G.coinCells.size < Math.min(n, safe.length)) G.coinCells.add(safe[Math.floor(Math.random() * safe.length)]);
+}
+
 function begin(i) {
-  G.started = true; G.t0 = performance.now();
+  G.started = true; G.t0 = performance.now(); G.fuseAt = G.t0;
   if (G.start >= 0) paint(G.start);
   startTimer();
   setStatus({ kind: "play" });
@@ -989,13 +1070,43 @@ function reveal(i) {
       paint(j, "pop", Math.min(dist[h] + 1, 30) * 14);
     }
   }
+  G.fuseAt = performance.now();
+  if (G.coinCells) {
+    let got = 0;
+    for (let h = 0; h < q.length; h++) {
+      const k = q[h];
+      if (!G.coinCells.has(k)) continue;
+      G.coinCells.delete(k); got++;
+      coinPop(cells[k], 1, Math.min(dist[h], 30) * 14);
+    }
+    if (got) { G.coinsRun += got; addCoins(got); Sound.coin(); if (!flashActive && G.started && !G.over) setStatus({ kind: "play" }); }
+  }
   return q.length;
+}
+
+function coinPop(el, amount, delay) {
+  const r = el.getBoundingClientRect();
+  const d = document.createElement("div");
+  d.className = "coin-pop"; d.setAttribute("aria-hidden", "true");
+  d.innerHTML = '<i class="coin sm"></i>+' + amount;
+  d.style.left = (r.left + r.width / 2 - 16) + "px"; d.style.top = (r.top - 4) + "px";
+  d.style.animationDelay = (delay || 0) + "ms";
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 1000 + (delay || 0));
+}
+function addCoins(n) {
+  wallet.coins += n; saveWallet(); updateCoins(true);
+}
+function updateCoins(bump) {
+  $("coinBal").textContent = wallet.coins;
+  if (bump && motion) { const w = $("wallet"); w.classList.remove("bump"); void w.offsetWidth; w.classList.add("bump"); }
+  renderShop();
 }
 
 function chord(i) {
   const k = G.adj[i]; if (!k) return;
   let f = 0; const cov = [];
-  for (const j of G.nb[i]) { if (G.state[j] === 2 || G.state[j] === 3) f++; else if (G.state[j] === 0 || G.state[j] === 4) cov.push(j); }
+  for (const j of G.nb[i]) { if (G.state[j] === 2 || G.state[j] === 3 || G.state[j] === 5) f++; else if (G.state[j] === 0 || G.state[j] === 4) cov.push(j); }
   if (!cov.length) return;
   if (f !== k) { for (const j of cov) { cells[j].classList.remove("nudge"); void cells[j].offsetWidth; cells[j].classList.add("nudge"); } Sound.deny(); return; }
   let n = 0;
@@ -1004,6 +1115,15 @@ function chord(i) {
 }
 
 function hitMine(i) {
+  if (G.shield) {
+    G.shield = false; G.state[i] = 5; G.flags++;
+    paint(i, "drop");
+    if (realFx()) FX.small(cells[i]); else { shake(); Sound.boom(0.4); }
+    Sound.shield();
+    flash("Der Schild hat die Mine bei " + coord(i) + " abgefangen.");
+    updatePowerBar();
+    return;
+  }
   if (G.mode === "lives" && G.lives > 1) {
     G.lives--; G.state[i] = 3; G.flags++;
     paint(i, "drop");
@@ -1046,9 +1166,11 @@ function lose(hit, reason) {
   if (realFx()) blowUp(hit, showMines); else { showMines(true); shake(); Sound.boom(0.8); }
   vibrate(60);
   bumpTally(false);
-  const safe = N - G.n;
-  setStatus({ kind: "lose", title: reason === "time" ? "Zeit abgelaufen" : "Mine bei " + coord(hit),
-    meta: G.opened + " von " + safe + " Feldern offen · " + Math.round(G.opened / safe * 100) + " %" });
+  G.armed = null; board.classList.remove("armed");
+  const safe = N - G.n, earned = awardCoins(false) + G.coinsRun;
+  const title = reason === "time" ? "Zeit abgelaufen" : reason === "fuse" ? "Zündschnur abgebrannt" : "Mine bei " + coord(hit);
+  setStatus({ kind: "lose", title,
+    meta: G.opened + " von " + safe + " Feldern offen · " + Math.round(G.opened / safe * 100) + " %" + (earned ? " · +" + earned + " Münzen" : "") });
   updateHud(); updateSide();
 }
 
@@ -1078,15 +1200,115 @@ function win() {
   const bvs = G.bv / Math.max(G.elapsed, 0.1);
   const parts = [fmtTime(t), "3BV " + G.bv, bvs.toFixed(2) + " 3BV/s"];
   if (G.hints) parts.push(G.hints + (G.hints === 1 ? " Tipp" : " Tipps"));
+  const earned = awardCoins(true) + G.coinsRun;
+  if (earned) parts.push("+" + earned + " Münzen");
+  G.armed = null; board.classList.remove("armed");
   setStatus({ kind: "win", title: "Feld geräumt", meta: parts.join(" · "), record: rec });
   updateHud(); updateSide();
 }
 
+// Coins for a finished game. Classic pays nothing, the daily board pays once per day.
+function awardCoins(won) {
+  const mult = COIN_MULT[G.mode] || 0;
+  if (!mult) return 0;
+  const base = G.mode === "daily" ? 30 : G.diff === "custom" ? Math.max(3, Math.round(G.n * 0.8)) : COIN_BASE[G.diff];
+  let c = 0;
+  if (won) {
+    c = Math.round(base * mult);
+    if (G.mode === "daily") { if (store.get("mf:dailyPaid", "") === todayKey()) c = 0; else store.set("mf:dailyPaid", todayKey()); }
+  } else {
+    c = Math.floor(base * mult * 0.3 * G.opened / (G.w * G.h - G.n));
+  }
+  if (c) addCoins(c);
+  return c;
+}
+
+/* ---------- power-ups (arcade) ---------- */
+function renderShop() {
+  const box = $("shop"); if (!box) return;
+  box.innerHTML = Object.entries(POWERS).map(([k, p]) =>
+    '<div class="item"><b>' + p.label + '</b><small>' + p.desc + '</small><span class="own">Im Besitz: ' + wallet.inv[k] + '</span>' +
+    '<button class="btn" type="button" data-buy="' + k + '"' + (wallet.coins < p.price ? " disabled" : "") + '><i class="coin sm" aria-hidden="true"></i>' + p.price + '</button></div>').join("");
+}
+function buy(k) {
+  const p = POWERS[k]; if (!p || wallet.coins < p.price) return;
+  wallet.coins -= p.price; wallet.inv[k]++; saveWallet();
+  Sound.coin(); updateCoins(false); updatePowerBar();
+}
+function updatePowerBar() {
+  const bar = $("powerBar");
+  bar.hidden = !G || G.mode !== "arcade";
+  if (bar.hidden) return;
+  bar.innerHTML = Object.entries(POWERS).map(([k, p]) => {
+    const active = G.armed === k || (k === "shield" && G.shield);
+    const off = !wallet.inv[k] || !G.started || G.over || G.generating || (k === "shield" && G.shield);
+    return '<button type="button" class="power" data-power="' + k + '" aria-pressed="' + active + '"' + (off ? " disabled" : "") +
+      ' title="' + p.desc + '"><kbd>' + p.key + '</kbd><b>' + p.label + '</b><span>' + (k === "shield" && G.shield ? "aktiv" : wallet.inv[k] + "×") + '</span></button>';
+  }).join("");
+}
+function consume(k) { wallet.inv[k]--; saveWallet(); renderShop(); }
+function usePower(k) {
+  if (!G || G.mode !== "arcade" || G.over || G.generating) return;
+  if (!G.started) { flash("Deck zuerst ein Feld auf, dann wirken die Power-ups."); return; }
+  if (!wallet.inv[k]) { flash("Kein " + POWERS[k].label + " übrig. Im Laden gibt es Nachschub."); return; }
+  if (POWERS[k].target) {
+    G.armed = G.armed === k ? null : k;
+    board.classList.toggle("armed", !!G.armed);
+    flash(G.armed ? POWERS[k].label + " bereit. Wähl ein verdecktes Feld, Esc bricht ab." : POWERS[k].label + " abgebrochen.");
+  } else if (k === "shield") {
+    if (G.shield) return;
+    consume(k); G.shield = true; Sound.shield();
+    flash("Schild aktiv. Die nächste Mine richtet keinen Schaden an.");
+  } else if (k === "scout") {
+    const zeros = [], other = [];
+    for (let i = 0; i < G.w * G.h; i++) {
+      if (G.mine[i] || (G.state[i] !== 0 && G.state[i] !== 4)) continue;
+      (G.adj[i] === 0 ? zeros : other).push(i);
+    }
+    const pool = zeros.length ? zeros : other;
+    if (!pool.length) return;
+    const t = pool[Math.floor(Math.random() * pool.length)];
+    consume(k);
+    Sound.reveal(reveal(t));
+    cells[t].classList.add("hinted"); setFocus(t, true);
+    flash("Der Späher hat bei " + coord(t) + " eine sichere Stelle gefunden.");
+  }
+  after(); updatePowerBar();
+}
+function usePowerOn(i) {
+  const k = G.armed, s = G.state[i];
+  if (s === 1 || s === 3 || s === 5) { flash("Wähl ein verdecktes Feld."); return; }
+  G.armed = null; board.classList.remove("armed");
+  consume(k);
+  if (k === "defuse") {
+    if (s === 2) G.flags--;
+    if (G.mine[i]) {
+      G.state[i] = 5; G.flags++; paint(i, "drop"); Sound.defuse();
+      flash("Mine bei " + coord(i) + " entschärft.");
+    } else {
+      G.state[i] = 0; Sound.reveal(reveal(i));
+      flash("Keine Mine bei " + coord(i) + ". Das Feld ist sicher aufgedeckt.");
+    }
+  } else if (k === "xray") {
+    const area = [i, ...G.nb[i]].filter((j) => G.state[j] !== 1 && G.state[j] !== 3 && G.state[j] !== 5);
+    for (const j of area) {
+      const el = cells[j];
+      el.classList.add("peek", G.mine[j] ? "peek-mine" : "peek-safe");
+      if (!G.mine[j]) el.dataset.peek = G.adj[j] ? G.adj[j] : "·";
+    }
+    Sound.xray();
+    const game = G;
+    setTimeout(() => { if (G !== game) return; for (const j of area) { cells[j].classList.remove("peek", "peek-mine", "peek-safe"); delete cells[j].dataset.peek; } }, 2000);
+    flash("Röntgen: 2 Sekunden Einblick rund um " + coord(i) + ".");
+  }
+  after(); updatePowerBar();
+}
+
 function hint() {
-  if (!G || G.over || G.generating) return;
+  if (!G || G.over || G.generating || G.mode === "hardcore") return;
   if (!G.started) { act(G.start >= 0 ? G.start : focusIdx, false); return; }
   const N = G.w * G.h, open = new Uint8Array(N), known = new Uint8Array(N);
-  for (let i = 0; i < N; i++) { if (G.state[i] === 1) open[i] = 1; if (G.state[i] === 3) known[i] = 1; }
+  for (let i = 0; i < N; i++) { if (G.state[i] === 1) open[i] = 1; if (G.state[i] === 3 || G.state[i] === 5) known[i] = 1; }
   let t = solve(G, open, known, true).safe;
   if (t == null) {
     const border = [], rest = [];
@@ -1114,6 +1336,7 @@ function tick() {
   if (!G || !G.started) return;
   if (!G.over) G.elapsed = (performance.now() - G.t0) / 1000;
   if (G.mode === "timed" && !G.over && G.limit - finalTime() <= 0) { G.elapsed = G.limit - G.penalty; lose(-1, "time"); return; }
+  if (G.mode === "hardcore" && !G.over && performance.now() - G.fuseAt >= FUSE * 1000) { lose(-1, "fuse"); return; }
   updateTime();
 }
 function updateTime() {
@@ -1126,9 +1349,16 @@ function updateTime() {
     el.textContent = fmtTime(G.started ? finalTime() : 0).replace(" s", "");
     el.classList.remove("warn");
   }
+  if (G.mode === "hardcore") {
+    const left = G.started && !G.over ? Math.max(0, FUSE - (performance.now() - G.fuseAt) / 1000) : G.over && !G.won ? 0 : FUSE;
+    $("fuse").textContent = left.toFixed(1);
+    $("fuse").classList.toggle("warn", left <= 3);
+    $("fuseBar").style.transform = "scaleX(" + (left / FUSE) + ")";
+  }
 }
 function updateHud() {
-  $("mineCount").textContent = G.n - G.flags;
+  $("mineCount").textContent = G.mode === "hardcore" && !G.over ? "???" : G.n - G.flags;
+  $("fuseStat").hidden = G.mode !== "hardcore";
   $("timeLabel").textContent = G.mode === "timed" ? "Restzeit" : "Zeit";
   updateTime();
   const ls = $("livesStat");
@@ -1137,11 +1367,12 @@ function updateHud() {
     $("lives").innerHTML = [0, 1, 2].map((k) => '<i class="' + (k < G.lives ? "" : "lost") + '"></i>').join("");
     $("lives").setAttribute("aria-label", G.lives + " von 3 Leben");
   }
-  $("hintBtn").disabled = G.over || G.generating;
+  $("hintBtn").disabled = G.over || G.generating || G.mode === "hardcore";
+  updatePowerBar();
 }
 
 function setStatus(o) {
-  clearTimeout(statusTimer);
+  clearTimeout(statusTimer); flashActive = false;
   statusEl.className = "status";
   if (o.kind === "idle") statusEl.innerHTML = "<span>" + o.text + "</span>";
   else if (o.kind === "play") statusEl.innerHTML = "<span>" + playText() + "</span>";
@@ -1155,12 +1386,15 @@ function setStatus(o) {
 function playText() {
   const bits = [MODES[G.mode].label, G.w + " × " + G.h, G.n + " Minen", "3BV " + G.bv];
   if (G.fallback) bits.push("Raten möglich");
+  if (G.mode === "hardcore") bits[2] = "Minenzahl geheim";
+  if (G.mode === "arcade") bits.push(G.coinsRun + " Münzen gesammelt" + (G.shield ? " · Schild aktiv" : ""));
   return bits.join(" · ");
 }
 function flash(text, kind) {
   setStatus({ kind: "play" });
   statusEl.innerHTML = "<span>" + text + "</span>";
   if (kind) statusEl.classList.add(kind);
+  flashActive = true;
   statusTimer = setTimeout(() => { if (G && !G.over && G.started) setStatus({ kind: "play" }); }, 2800);
 }
 
@@ -1230,7 +1464,8 @@ function renderControls() {
   c.setAttribute("aria-pressed", String(!daily && prefs.diff === "custom"));
   c.innerHTML = "Eigenes <small>" + prefs.custom.w + "×" + prefs.custom.h + " · " + prefs.custom.n + "</small>";
   ds.appendChild(c);
-  if (daily) { const s = document.createElement("span"); s.className = "daily-note"; s.textContent = "Tagesfeld: fest 16 × 16 mit 40 Minen"; ds.appendChild(s); }
+  const note = daily ? "Tagesfeld: fest 16 × 16 mit 40 Minen" : prefs.mode === "hardcore" ? "Hardcore: 25 % mehr Minen als angegeben" : "";
+  if (note) { const s = document.createElement("span"); s.className = "daily-note"; s.textContent = note; ds.appendChild(s); }
   const form = $("custom");
   form.hidden = daily || prefs.diff !== "custom";
   $("cw").value = prefs.custom.w; $("ch").value = prefs.custom.h; $("cn").value = prefs.custom.n;
@@ -1279,6 +1514,8 @@ $("flagBtn").addEventListener("click", () => {
   flagMode = !flagMode; $("flagBtn").setAttribute("aria-pressed", String(flagMode));
 });
 statusEl.addEventListener("click", (e) => { if (e.target.closest("[data-new]")) newGame(); });
+$("shop").addEventListener("click", (e) => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buy(b.dataset.buy); });
+$("powerBar").addEventListener("click", (e) => { const b = e.target.closest("[data-power]"); if (b && !b.disabled) usePower(b.dataset.power); });
 
 /* board input: click, right click, long press, keyboard */
 let lastPointer = "mouse", press = null;
@@ -1328,6 +1565,9 @@ board.addEventListener("keydown", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.target.closest && e.target.closest("input")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const pk = Object.keys(POWERS).find((k) => POWERS[k].key === e.key);
+  if (pk && G && G.mode === "arcade") { usePower(pk); return; }
+  if (e.key === "Escape" && G && G.armed) { G.armed = null; board.classList.remove("armed"); updatePowerBar(); setStatus({ kind: "play" }); return; }
   if (e.key === "n" || e.key === "N") newGame();
   else if (e.key === "h" || e.key === "H") hint();
   else if (e.key === "f" || e.key === "F") $("flagBtn").click();
@@ -1338,6 +1578,7 @@ window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(size
 
 renderControls();
 renderSettings();
+updateCoins(false);
 newGame();
 updateSide();
 })();
