@@ -154,6 +154,17 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 @keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
 @keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
 .foot-info{margin:0;font-size:13px;color:var(--muted)}
+.fx{position:fixed;inset:0;pointer-events:none;z-index:50}
+.board.blasted{background:radial-gradient(circle at var(--sx) var(--sy),#050302 0,#1C0E06 14%,rgba(40,20,8,.55) 32%,transparent 60%),var(--grid)}
+.board.blasted .cell{visibility:hidden}
+.board.rebuild .cell{animation:pop .4s cubic-bezier(.2,.8,.3,1.2) both;animation-delay:calc(var(--d,0) * 1ms)}
+.seg{display:flex;gap:4px;padding:3px;background:var(--bg);border-radius:9px}
+.seg button{appearance:none;flex:1;border:0;background:transparent;border-radius:7px;padding:6px 8px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.setting{display:grid;gap:5px}
+.setting + .setting{margin-top:10px}
+.setting > span{font-size:13px;font-weight:600}
+.card p.small{font-size:12px;margin-top:8px}
 
 .side{grid-area:side;display:grid;gap:12px;align-content:start}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
@@ -233,6 +244,24 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 
   <aside class="side">
     <section class="card">
+      <h2>Einstellungen</h2>
+      <div class="setting">
+        <span id="fxLabel">Explosion</span>
+        <div class="seg" id="fxSeg" role="group" aria-labelledby="fxLabel">
+          <button type="button" data-fx="simple">Einfach</button>
+          <button type="button" data-fx="real">Realistisch</button>
+        </div>
+      </div>
+      <div class="setting">
+        <span id="sndLabel">Ton</span>
+        <div class="seg" id="sndSeg" role="group" aria-labelledby="sndLabel">
+          <button type="button" data-snd="off">Aus</button>
+          <button type="button" data-snd="on">An</button>
+        </div>
+      </div>
+      <p class="small" id="fxNote">Realistisch: Feuerball, Druckwelle, Kettenreaktion. Das ganze Feld fliegt weg.</p>
+    </section>
+    <section class="card">
       <h2 id="bestTitle">Bestzeiten</h2>
       <dl class="rows" id="bestRows"></dl>
     </section>
@@ -286,7 +315,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
 
-const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 } }, store.get("mf:prefs", {}));
+const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true }, store.get("mf:prefs", {}));
 if (!MODES[prefs.mode]) prefs.mode = "classic";
 if (!PRESETS[prefs.diff] && prefs.diff !== "custom") prefs.diff = "beginner";
 const savePrefs = () => store.set("mf:prefs", prefs);
@@ -445,7 +474,270 @@ function dailyBoard(w, h, n, nb) {
   return (dailyCache[key] = first);
 }
 
+/* ---------- sound ---------- */
+const Sound = (() => {
+  let ctx = null, out = null, noise = null, lastAt = 0;
+  function get() {
+    if (!prefs.sound) return null;
+    try {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+        ctx = new AC();
+        out = ctx.createDynamicsCompressor(); out.connect(ctx.destination);
+        const len = ctx.sampleRate * 2;
+        noise = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = noise.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.4);
+      }
+      if (ctx.state === "suspended") ctx.resume();
+      return ctx;
+    } catch (e) { return null; }
+  }
+  function boom(power) {
+    const a = get(); if (!a) return;
+    const nowMs = performance.now();
+    if (power < 1 && nowMs - lastAt < 90) return;
+    lastAt = nowMs;
+    const t = a.currentTime;
+    const src = a.createBufferSource(); src.buffer = noise;
+    const lp = a.createBiquadFilter(); lp.type = "lowpass";
+    lp.frequency.setValueAtTime(300 + 2600 * power, t);
+    lp.frequency.exponentialRampToValueAtTime(70, t + 1.5);
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9 * power, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4 + 1.5 * power);
+    src.connect(lp).connect(g).connect(out); src.start(t); src.stop(t + 2);
+    const o = a.createOscillator(); o.type = "sine";
+    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(26, t + 0.55);
+    const og = a.createGain();
+    og.gain.setValueAtTime(power, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.8);
+  }
+  return { boom, unlock: get };
+})();
+
+/* ---------- realistic explosion ---------- */
+const FX = (() => {
+  let cv = null, ctx = null, raf = 0, dpr = 1, t0 = 0, endAt = 0, onDone = null;
+  let fire = [], smoke = [], sparks = [], debris = [], rings = [], flashes = [], shakes = [], events = [];
+  const app = document.querySelector(".app");
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  function setup() {
+    if (!cv) { cv = document.createElement("canvas"); cv.className = "fx"; cv.setAttribute("aria-hidden", "true"); ctx = cv.getContext("2d"); }
+    if (!cv.isConnected) document.body.appendChild(cv);
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+    cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function blast(x, y, S, power, particleScale) {
+    const now = performance.now(), k = particleScale == null ? 1 : particleScale;
+    flashes.push({ t: now, dur: 120 + 140 * power, a: power >= 1 ? 0.6 : 0.1 * k });
+    rings.push({ x, y, t: now, dur: 520 * power + 150, max: S * (3 + 7 * power) });
+    const nf = Math.round(110 * power * k);
+    for (let i = 0; i < nf; i++) {
+      const ang = Math.random() * Math.PI * 2, sp = S * rnd(0.002, 0.016) * power;
+      fire.push({ x: x + rnd(-S, S) * 0.2, y: y + rnd(-S, S) * 0.2, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - S * 0.0015,
+        r0: S * rnd(0.25, 0.7) * (0.6 + power * 0.6), t: now, life: rnd(320, 820) * (0.6 + power * 0.5) });
+    }
+    const ns = Math.round(50 * power * k);
+    for (let i = 0; i < ns; i++) {
+      const ang = Math.random() * Math.PI * 2, sp = S * rnd(0.012, 0.045) * power;
+      sparks.push({ x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - S * 0.01, t: now, life: rnd(350, 1100) });
+    }
+    const nm = Math.round(30 * power * k);
+    for (let i = 0; i < nm; i++) {
+      const ang = Math.random() * Math.PI * 2, sp = S * rnd(0.0005, 0.004) * power;
+      smoke.push({ x: x + rnd(-S, S) * 0.5, y: y + rnd(-S, S) * 0.5, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        r0: S * rnd(0.4, 0.9), r1: S * rnd(1.6, 3.2) * (0.5 + power * 0.7), t: now + rnd(40, 200), life: rnd(1500, 3000) * (0.6 + power * 0.5) });
+    }
+    shakes.push({ t: now, dur: 380 + 420 * power, amp: Math.min(18, S * 0.4) * power });
+    Sound.boom(Math.min(1, power));
+  }
+
+  // Blows up the whole board: every tile flies off, then all mines go off in a chain.
+  function boardBlast(G, cells, hit, done) {
+    cancel(); setup();
+    const now = performance.now(); t0 = now; onDone = done;
+    const N = G.w * G.h, rects = cells.map((c) => c.getBoundingClientRect());
+    const S = Math.max(22, rects[0].width);
+    const colors = { tile: css("--tile"), hi: css("--tile-hi"), lo: css("--tile-lo"), open: css("--open"), accent: css("--accent"), font: css("--display") };
+    for (let n = 1; n <= 8; n++) colors["n" + n] = css("--n" + n);
+    if (hit < 0) {
+      let best = Infinity; const cx = G.w / 2, cy = G.h / 2;
+      for (let i = 0; i < N; i++) if (G.mine[i]) { const d = Math.hypot(i % G.w - cx, Math.floor(i / G.w) - cy); if (d < best) { best = d; hit = i; } }
+    }
+    const hr = rects[hit], hx = hr.left + hr.width / 2, hy = hr.top + hr.height / 2;
+    for (let i = 0; i < N; i++) {
+      if (i === hit) continue;
+      const r = rects[i], x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const dx = x - hx, dy = y - hy, d = Math.hypot(dx, dy) || 1;
+      const s = G.state[i];
+      const base = { kind: s === 1 ? "open" : s === 2 ? "flag" : s === 3 ? "mine" : "tile", num: s === 1 ? G.adj[i] : 0 };
+      const push = 1.25 / (1 + (d / S) * 0.3);
+      const launch = now + d / 1.5;
+      const pieces = d < S * 1.6 ? [[-.25, -.25], [.25, -.25], [-.25, .25], [.25, .25]] : [[0, 0]];
+      for (const [ox, oy] of pieces) {
+        const w = pieces.length > 1 ? r.width / 2 : r.width, h = pieces.length > 1 ? r.height / 2 : r.height;
+        const ang = Math.atan2(dy, dx) + rnd(-0.45, 0.45), sp = S * 0.055 * push * rnd(0.6, 1.4);
+        debris.push(Object.assign({}, base, {
+          x: x + ox * r.width, y: y + oy * r.height, w, h, shard: pieces.length > 1,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - S * 0.022 * push * rnd(0.3, 1),
+          rot: 0, vr: rnd(-0.03, 0.03) * push * 1.4, launch, char: Math.max(0, 1 - d / (S * 3.5))
+        }));
+      }
+    }
+    blast(hx, hy, S, 1.25);
+    const others = [];
+    for (let i = 0; i < N; i++) if (G.mine[i] && i !== hit) {
+      const r = rects[i];
+      others.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, d: Math.hypot(r.left - hr.left, r.top - hr.top) / S });
+    }
+    others.sort((a, b) => a.d - b.d);
+    const k = Math.min(1, 14 / Math.max(1, others.length));
+    let last = 0;
+    others.forEach((o, n) => {
+      const at = Math.min(2400, 220 + o.d * 55 + n * 12 + rnd(0, 90));
+      last = Math.max(last, at);
+      events.push({ at: now + at, fn: () => blast(o.x, o.y, S, rnd(0.45, 0.7), k) });
+    });
+    endAt = now + Math.max(3200, last + 2400);
+    colorsCache = colors;
+    raf = requestAnimationFrame(frame);
+    return { x: hr.left + hr.width / 2, y: hr.top + hr.height / 2 };
+  }
+
+  // A single mine that costs a life: fireball without flying tiles.
+  function small(cell) {
+    const r = cell.getBoundingClientRect();
+    const alive = !!raf;
+    if (!alive) { cancel(); setup(); onDone = null; }
+    blast(r.left + r.width / 2, r.top + r.height / 2, Math.max(22, r.width), 0.6);
+    endAt = Math.max(endAt, performance.now() + 2600);
+    if (!alive) { t0 = performance.now(); raf = requestAnimationFrame(frame); }
+  }
+
+  let colorsCache = null, last = 0;
+  function frame(now) {
+    const dt = Math.min(34, last ? now - last : 16); last = now;
+    for (let i = events.length - 1; i >= 0; i--) if (now >= events[i].at) { const e = events[i]; events.splice(i, 1); e.fn(); }
+    const W = innerWidth, H = innerHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    let sx = 0, sy = 0;
+    shakes = shakes.filter((s) => now - s.t < s.dur);
+    for (const s of shakes) { const f = 1 - (now - s.t) / s.dur; sx += rnd(-1, 1) * s.amp * f * f; sy += rnd(-1, 1) * s.amp * f * f; }
+    app.style.transform = shakes.length ? "translate(" + sx.toFixed(1) + "px," + sy.toFixed(1) + "px)" : "";
+
+    // flying tiles
+    const g = 0.0024;
+    debris = debris.filter((p) => p.y < H + 200 && p.x > -200 && p.x < W + 200);
+    for (const p of debris) {
+      if (now >= p.launch) { p.vy += g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; p.vx *= Math.pow(0.9993, dt); }
+      drawTile(p, now < p.launch && now > p.launch - 140 ? rnd(-1.5, 1.5) : 0);
+    }
+
+    // smoke
+    smoke = smoke.filter((p) => now - p.t < p.life);
+    for (const p of smoke) {
+      if (now < p.t) continue;
+      const f = (now - p.t) / p.life;
+      p.vy -= 0.000025 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.995;
+      const r = p.r0 + (p.r1 - p.r0) * Math.sqrt(f), a = Math.sin(Math.PI * f) * 0.42;
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grd.addColorStop(0, "rgba(46,42,38," + a + ")"); grd.addColorStop(1, "rgba(46,42,38,0)");
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = "lighter";
+    fire = fire.filter((p) => now - p.t < p.life);
+    for (const p of fire) {
+      const f = (now - p.t) / p.life;
+      const drag = Math.pow(0.991, dt);
+      p.vx *= drag; p.vy = p.vy * drag - 0.00035 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+      const r = p.r0 * (1 + f * 1.8);
+      const c = f < 0.12 ? "255,247,220" : f < 0.35 ? "255,196,90" : f < 0.65 ? "240,110,35" : "130,40,18";
+      const a = Math.pow(1 - f, 1.3) * 0.85;
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grd.addColorStop(0, "rgba(" + c + "," + a + ")"); grd.addColorStop(1, "rgba(" + c + ",0)");
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    sparks = sparks.filter((p) => now - p.t < p.life);
+    ctx.lineCap = "round";
+    for (const p of sparks) {
+      const f = (now - p.t) / p.life;
+      p.vy += 0.0016 * dt; p.vx *= Math.pow(0.996, dt); p.x += p.vx * dt; p.y += p.vy * dt;
+      ctx.strokeStyle = "rgba(255," + Math.round(220 - 120 * f) + "," + Math.round(140 - 110 * f) + "," + (1 - f) + ")";
+      ctx.lineWidth = 2 - f;
+      ctx.beginPath(); ctx.moveTo(p.x - p.vx * 14, p.y - p.vy * 14); ctx.lineTo(p.x, p.y); ctx.stroke();
+    }
+    rings = rings.filter((r) => now - r.t < r.dur);
+    for (const r of rings) {
+      const f = (now - r.t) / r.dur;
+      ctx.strokeStyle = "rgba(255,236,200," + (0.55 * (1 - f)) + ")";
+      ctx.lineWidth = 1 + 7 * (1 - f);
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.max * Math.sqrt(f), 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    flashes = flashes.filter((fl) => now - fl.t < fl.dur);
+    for (const fl of flashes) {
+      ctx.fillStyle = "rgba(255,240,215," + fl.a * (1 - (now - fl.t) / fl.dur) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (now >= endAt && !events.length && !fire.length && !sparks.length) {
+      const cb = onDone; cancel(); if (cb) cb();
+      return;
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function drawTile(p, jitter) {
+    const C = colorsCache;
+    ctx.save();
+    ctx.translate(p.x + jitter, p.y + jitter * 0.6);
+    ctx.rotate(p.rot);
+    const w = p.w, h = p.h, rr = Math.min(w, h) * 0.14;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, rr); else ctx.rect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = p.kind === "open" ? C.open : p.kind === "mine" ? "#7a1d10" : C.tile;
+    ctx.fill();
+    if (p.kind !== "open" && !p.shard) { ctx.fillStyle = C.lo; ctx.fillRect(-w / 2 + rr, h / 2 - 2, w - 2 * rr, 2); }
+    if (!p.shard) {
+      if (p.kind === "open" && p.num) {
+        ctx.fillStyle = C["n" + p.num]; ctx.font = "800 " + Math.round(h * 0.58) + "px " + C.font;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(p.num, 0, h * 0.03);
+      } else if (p.kind === "flag") {
+        ctx.fillStyle = C.accent;
+        ctx.fillRect(-w * 0.2, -h * 0.28, w * 0.07, h * 0.56);
+        ctx.beginPath(); ctx.moveTo(-w * 0.13, -h * 0.28); ctx.lineTo(w * 0.25, -h * 0.12); ctx.lineTo(-w * 0.13, h * 0.04); ctx.fill();
+      }
+    }
+    if (p.char > 0) {
+      ctx.globalAlpha = p.char * 0.8; ctx.fillStyle = "#140a04";
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, rr); else ctx.rect(-w / 2, -h / 2, w, h); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  function cancel() {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0; last = 0; endAt = 0; onDone = null;
+    fire = []; smoke = []; sparks = []; debris = []; rings = []; flashes = []; shakes = []; events = [];
+    app.style.transform = "";
+    if (cv && cv.isConnected) cv.remove();
+  }
+  return { boardBlast, small, cancel, get active() { return !!raf; } };
+})();
+const realFx = () => prefs.fx === "real" && motion;
+
 /* ---------- game state ---------- */
+let rebuildTimer = null;
 let G = null, cells = [], focusIdx = 0, timerId = null, genToken = 0, flagMode = false, statusTimer = null;
 
 function currentDims() {
@@ -457,6 +749,8 @@ function recordKey() { return prefs.mode === "daily" ? "daily" : prefs.diff; }
 
 function newGame() {
   stopTimer(); genToken++;
+  FX.cancel(); clearTimeout(rebuildTimer);
+  board.classList.remove("blasted", "rebuild");
   let { w, h, n } = currentDims();
   const avail = wrap.clientWidth || window.innerWidth;
   if (w > h && avail < w * 25) { const t = w; w = h; h = t; }
@@ -615,7 +909,8 @@ function hitMine(i) {
   if (G.mode === "lives" && G.lives > 1) {
     G.lives--; G.state[i] = 3; G.flags++;
     paint(i, "drop");
-    shake(); vibrate([30, 40, 30]);
+    if (realFx()) FX.small(cells[i]); else { shake(); Sound.boom(0.5); }
+    vibrate([30, 40, 30]);
     flash("Mine bei " + coord(i) + ". Noch " + G.lives + (G.lives === 1 ? " Leben." : " Leben."), "lose");
     return;
   }
@@ -648,12 +943,32 @@ function lose(hit, reason) {
     }
   }
   if (hit >= 0) { cells[hit].className = "cell open mine boom"; cells[hit].style.animationDelay = "0ms"; }
-  shake(); vibrate(60);
+  if (realFx()) blowUp(hit); else { shake(); Sound.boom(0.8); }
+  vibrate(60);
   bumpTally(false);
   const safe = N - G.n;
   setStatus({ kind: "lose", title: reason === "time" ? "Zeit abgelaufen" : "Mine bei " + coord(hit),
     meta: G.opened + " von " + safe + " Feldern offen · " + Math.round(G.opened / safe * 100) + " %" });
   updateHud(); updateSide();
+}
+
+function blowUp(hit) {
+  const game = G;
+  const c = FX.boardBlast(G, cells, hit, () => {
+    if (G !== game) return;
+    for (const el of cells) {
+      el.classList.remove("drop", "pop");
+      const r = el.getBoundingClientRect();
+      el.style.setProperty("--d", Math.round(Math.hypot(r.left - c.x, r.top - c.y) * 0.9));
+    }
+    board.classList.remove("blasted");
+    board.classList.add("rebuild");
+    rebuildTimer = setTimeout(() => board.classList.remove("rebuild"), 1600);
+  });
+  const br = board.getBoundingClientRect();
+  board.style.setProperty("--sx", (c.x - br.left) + "px");
+  board.style.setProperty("--sy", (c.y - br.top) + "px");
+  board.classList.add("blasted");
 }
 
 function win() {
@@ -842,6 +1157,20 @@ $("custom").addEventListener("submit", (e) => {
   $("customNote").textContent = "Feld " + w + " × " + h + " mit " + n + " Minen, Dichte " + Math.round(n / (w * h) * 100) + " %";
 });
 
+function renderSettings() {
+  for (const b of $("fxSeg").children) b.setAttribute("aria-pressed", String(b.dataset.fx === prefs.fx));
+  for (const b of $("sndSeg").children) b.setAttribute("aria-pressed", String((b.dataset.snd === "on") === prefs.sound));
+  $("fxNote").textContent = !motion && prefs.fx === "real"
+    ? "Dein System wünscht weniger Bewegung. Deshalb bleibt die Explosion einfach."
+    : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Das ganze Feld fliegt weg." : "Minen erscheinen, das Feld wackelt kurz.";
+}
+$("fxSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-fx]"); if (!b) return; prefs.fx = b.dataset.fx; savePrefs(); renderSettings(); });
+$("sndSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-snd]"); if (!b) return;
+  prefs.sound = b.dataset.snd === "on"; savePrefs(); renderSettings();
+  if (prefs.sound) Sound.unlock();
+});
+
 $("newBtn").addEventListener("click", newGame);
 $("hintBtn").addEventListener("click", hint);
 $("flagBtn").addEventListener("click", () => {
@@ -853,6 +1182,7 @@ statusEl.addEventListener("click", (e) => { if (e.target.closest("[data-new]")) 
 let lastPointer = "mouse", press = null;
 board.addEventListener("pointerdown", (e) => {
   lastPointer = e.pointerType;
+  if (prefs.sound) Sound.unlock();
   const c = e.target.closest(".cell"); if (!c || e.pointerType === "mouse") return;
   const i = +c.dataset.i;
   clearTimeout(press && press.t);
@@ -905,6 +1235,7 @@ let rz = null;
 window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(sizeBoard, 80); });
 
 renderControls();
+renderSettings();
 newGame();
 updateSide();
 })();
