@@ -261,6 +261,13 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
         </div>
       </div>
       <div class="setting">
+        <span id="styleLabel">Klang</span>
+        <div class="seg" id="styleSeg" role="group" aria-labelledby="styleLabel">
+          <button type="button" data-style="classic">Klassisch</button>
+          <button type="button" data-style="pups">Pups</button>
+        </div>
+      </div>
+      <div class="setting">
         <span id="qLabel">Fragezeichen</span>
         <div class="seg" id="qSeg" role="group" aria-labelledby="qLabel">
           <button type="button" data-q="off">Aus</button>
@@ -323,7 +330,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
 
-const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true, question: true }, store.get("mf:prefs", {}));
+const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true, question: true, soundStyle: "pups" }, store.get("mf:prefs", {}));
 if (!MODES[prefs.mode]) prefs.mode = "classic";
 if (!PRESETS[prefs.diff] && prefs.diff !== "custom") prefs.diff = "beginner";
 const savePrefs = () => store.set("mf:prefs", prefs);
@@ -539,6 +546,45 @@ const Sound = (() => {
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(bp).connect(g).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
   }
+  // Synthesized fart: buzzy sawtooth through a resonant filter, chopped by a flutter
+  // so it rattles instead of humming. High pitch keeps it light and squeaky.
+  function pups(t, o) {
+    const a = ctx, dur = o.dur, steps = Math.max(64, Math.round(dur * 1200));
+    const env = new Float32Array(steps), pitch = new Float32Array(steps);
+    let ph = Math.random() * 6.28;
+    for (let k = 0; k < steps; k++) {
+      const x = k / (steps - 1);
+      const fl = o.flutter * (1 + (o.accel || 0) * x) * (1 + (Math.random() - 0.5) * 0.25);
+      ph += 2 * Math.PI * fl * dur / steps;
+      const flap = Math.pow(Math.max(0, Math.sin(ph)), 1.6);
+      const shape = Math.min(1, x / 0.06) * Math.pow(1 - x, o.tail || 0.6);
+      env[k] = Math.max(0.0001, o.vol * shape * (0.18 + 0.82 * flap));
+      pitch[k] = (o.f0 + (o.f1 - o.f0) * x) * (1 + (Math.random() - 0.5) * 0.12 + 0.08 * Math.sin(ph * 0.5));
+    }
+    const osc = a.createOscillator(); osc.type = "sawtooth";
+    osc.frequency.setValueCurveAtTime(pitch, t, dur);
+    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = o.cut || 1300; lp.Q.value = 5;
+    const g = a.createGain(); g.gain.setValueCurveAtTime(env, t, dur);
+    osc.connect(lp).connect(g).connect(out);
+    osc.start(t); osc.stop(t + dur + 0.02);
+    const src = a.createBufferSource(); src.buffer = noise;
+    const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = o.f0 * 2.2; bp.Q.value = 1.5;
+    const ng = a.createGain(); ng.gain.setValueCurveAtTime(env.map((v) => v * 0.55), t, dur);
+    src.connect(bp).connect(ng).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
+  }
+  const pupsFx = {
+    // same speed as the click, loud, rattling through; big openings rattle longer
+    reveal(count) { const a = get(); if (!a) return;
+      pups(a.currentTime, { dur: count > 8 ? Math.min(0.75, 0.14 + count / 160) : 0.13, f0: 300, f1: 210, flutter: 42, accel: -0.3, vol: 1, tail: 0.5 }); },
+    flag() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.2, f0: 520, f1: 700, flutter: 60, vol: 0.8, cut: 1900 }); },
+    question() { const a = get(); if (!a) return; const t = a.currentTime;
+      pups(t, { dur: 0.09, f0: 380, f1: 420, flutter: 55, vol: 0.7 });
+      pups(t + 0.13, { dur: 0.16, f0: 420, f1: 720, flutter: 65, vol: 0.75, cut: 2000 }); },
+    unmark() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.32, f0: 360, f1: 170, flutter: 30, accel: -0.5, vol: 0.8, tail: 1.2 }); },
+    deny() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.22, f0: 150, f1: 130, flutter: 18, vol: 0.7, cut: 900 }); },
+    win() { const a = get(); if (!a) return; const t = a.currentTime;
+      [320, 400, 480, 640].forEach((f, k) => pups(t + k * 0.16, { dur: k === 3 ? 0.5 : 0.13, f0: f, f1: f * (k === 3 ? 1.25 : 1.05), flutter: 45, vol: 0.85 })); }
+  };
   const fx = {
     // short wooden tick; a bigger opening adds a soft sweep
     reveal(count) {
@@ -568,7 +614,9 @@ const Sound = (() => {
     win() { const a = get(); if (!a) return; const t = a.currentTime;
       [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); }
   };
-  return Object.assign({ boom, unlock: get }, fx);
+  const api = { boom, unlock: get };
+  for (const k of Object.keys(fx)) api[k] = (...args) => (prefs.soundStyle === "classic" ? fx : pupsFx)[k](...args);
+  return api;
 })();
 
 /* ---------- realistic explosion ---------- */
@@ -1234,12 +1282,18 @@ $("custom").addEventListener("submit", (e) => {
 function renderSettings() {
   for (const b of $("fxSeg").children) b.setAttribute("aria-pressed", String(b.dataset.fx === prefs.fx));
   for (const b of $("sndSeg").children) b.setAttribute("aria-pressed", String((b.dataset.snd === "on") === prefs.sound));
+  for (const b of $("styleSeg").children) b.setAttribute("aria-pressed", String(b.dataset.style === prefs.soundStyle));
   for (const b of $("qSeg").children) b.setAttribute("aria-pressed", String((b.dataset.q === "on") === prefs.question));
   $("fxNote").textContent = !motion && prefs.fx === "real"
     ? "Dein System wünscht weniger Bewegung. Deshalb bleibt die Explosion einfach."
     : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Das ganze Feld fliegt weg." : "Minen erscheinen, das Feld wackelt kurz.";
 }
 $("fxSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-fx]"); if (!b) return; prefs.fx = b.dataset.fx; savePrefs(); renderSettings(); });
+$("styleSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-style]"); if (!b) return;
+  prefs.soundStyle = b.dataset.style; savePrefs(); renderSettings();
+  if (prefs.sound) Sound.reveal(1);
+});
 $("qSeg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-q]"); if (!b) return;
   prefs.question = b.dataset.q === "on"; savePrefs(); renderSettings();
