@@ -156,9 +156,9 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 @keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
 .foot-info{margin:0;font-size:13px;color:var(--muted)}
 .fx{position:fixed;inset:0;pointer-events:none;z-index:50}
-.board.blasted{background:radial-gradient(circle at var(--sx) var(--sy),#050302 0,#1C0E06 14%,rgba(40,20,8,.55) 32%,transparent 60%),var(--grid)}
-.board.blasted .cell{visibility:hidden}
-.board.rebuild .cell{animation:pop .4s cubic-bezier(.2,.8,.3,1.2) both;animation-delay:calc(var(--d,0) * 1ms)}
+.board .cell.gone{background:radial-gradient(circle,#050302 0 28%,#2A1508 58%,var(--grid) 100%);box-shadow:none;color:transparent;animation:none}
+.board .cell.gone::before,.board .cell.gone::after{content:none}
+.board.rebuild .cell.mine{animation:pop .4s cubic-bezier(.2,.8,.3,1.2) both;animation-delay:calc(var(--d,0) * 1ms)}
 .seg{display:flex;gap:4px;padding:3px;background:var(--bg);border-radius:9px}
 .seg button{appearance:none;flex:1;border:0;background:transparent;border-radius:7px;padding:6px 8px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.15)}
@@ -267,7 +267,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
           <button type="button" data-q="on">An</button>
         </div>
       </div>
-      <p class="small" id="fxNote">Realistisch: Feuerball, Druckwelle, Kettenreaktion. Das ganze Feld fliegt weg.</p>
+      <p class="small" id="fxNote">Feuerball, Druckwelle und Kettenreaktion. Jedes Minenfeld fliegt in Stücken weg.</p>
     </section>
     <section class="card">
       <h2 id="bestTitle">Bestzeiten</h2>
@@ -655,30 +655,24 @@ const FX = (() => {
       for (let i = 0; i < N; i++) if (G.mine[i]) { const d = Math.hypot(i % G.w - cx, Math.floor(i / G.w) - cy); if (d < best) { best = d; hit = i; } }
     }
     const hr = rects[hit], hx = hr.left + hr.width / 2, hy = hr.top + hr.height / 2;
-    for (let i = 0; i < N; i++) {
-      if (i === hit) continue;
-      const r = rects[i], x = r.left + r.width / 2, y = r.top + r.height / 2;
-      const dx = x - hx, dy = y - hy, d = Math.hypot(dx, dy) || 1;
-      const s = G.state[i];
-      const base = { kind: s === 1 ? "open" : s === 2 ? "flag" : s === 3 ? "mine" : s === 4 ? "quest" : "tile", num: s === 1 ? G.adj[i] : 0 };
-      const push = 1.25 / (1 + (d / S) * 0.3);
-      const launch = now + d / 1.5;
-      const pieces = d < S * 1.6 ? [[-.25, -.25], [.25, -.25], [-.25, .25], [.25, .25]] : [[0, 0]];
-      for (const [ox, oy] of pieces) {
-        const w = pieces.length > 1 ? r.width / 2 : r.width, h = pieces.length > 1 ? r.height / 2 : r.height;
-        const ang = Math.atan2(dy, dx) + rnd(-0.45, 0.45), sp = S * 0.055 * push * rnd(0.6, 1.4);
-        debris.push(Object.assign({}, base, {
-          x: x + ox * r.width, y: y + oy * r.height, w, h, shard: pieces.length > 1,
-          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - S * 0.022 * push * rnd(0.3, 1),
-          rot: 0, vr: rnd(-0.03, 0.03) * push * 1.4, launch, char: Math.max(0, 1 - d / (S * 3.5))
-        }));
+    // Only mine tiles break apart. Each flies off the moment its own mine goes off.
+    const launchTile = (i, at) => {
+      const r = rects[i], x = r.left + r.width / 2, y = r.top + r.height / 2, s = G.state[i];
+      const kind = s === 2 ? "flag" : s === 4 ? "quest" : "tile";
+      for (const [ox, oy] of [[-.25, -.25], [.25, -.25], [-.25, .25], [.25, .25]]) {
+        const ang = Math.atan2(oy, ox) * 0.6 - Math.PI / 2 * 0.4 + rnd(-0.5, 0.5), sp = S * rnd(0.03, 0.06);
+        debris.push({ kind, num: 0, x: x + ox * r.width, y: y + oy * r.height, w: r.width / 2, h: r.height / 2, shard: true,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - S * rnd(0.02, 0.04),
+          rot: 0, vr: rnd(-0.04, 0.04), launch: now + at, char: rnd(0.35, 0.7) });
       }
-    }
+    };
+    launchTile(hit, 0);
+    cells[hit].classList.add("gone");
     blast(hx, hy, S, 1.25);
     const others = [];
-    for (let i = 0; i < N; i++) if (G.mine[i] && i !== hit) {
+    for (let i = 0; i < N; i++) if (G.mine[i] && i !== hit && G.state[i] !== 3) {
       const r = rects[i];
-      others.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, d: Math.hypot(r.left - hr.left, r.top - hr.top) / S });
+      others.push({ i, x: r.left + r.width / 2, y: r.top + r.height / 2, d: Math.hypot(r.left - hr.left, r.top - hr.top) / S });
     }
     others.sort((a, b) => a.d - b.d);
     const k = Math.min(1, 14 / Math.max(1, others.length));
@@ -686,7 +680,8 @@ const FX = (() => {
     others.forEach((o, n) => {
       const at = Math.min(2400, 220 + o.d * 55 + n * 12 + rnd(0, 90));
       last = Math.max(last, at);
-      events.push({ at: now + at, fn: () => blast(o.x, o.y, S, rnd(0.45, 0.7), k) });
+      launchTile(o.i, at);
+      events.push({ at: now + at, fn: () => { cells[o.i].classList.add("gone"); blast(o.x, o.y, S, rnd(0.45, 0.7), k); } });
     });
     endAt = now + Math.max(3200, last + 2400);
     colorsCache = colors;
@@ -720,8 +715,9 @@ const FX = (() => {
     const g = 0.0024;
     debris = debris.filter((p) => p.y < H + 200 && p.x > -200 && p.x < W + 200);
     for (const p of debris) {
-      if (now >= p.launch) { p.vy += g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; p.vx *= Math.pow(0.9993, dt); }
-      drawTile(p, now < p.launch && now > p.launch - 140 ? rnd(-1.5, 1.5) : 0);
+      if (now < p.launch) continue;
+      p.vy += g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; p.vx *= Math.pow(0.9993, dt);
+      drawTile(p, 0);
     }
 
     // smoke
@@ -836,7 +832,7 @@ function recordKey() { return prefs.mode === "daily" ? "daily" : prefs.diff; }
 function newGame() {
   stopTimer(); genToken++;
   FX.cancel(); clearTimeout(rebuildTimer);
-  board.classList.remove("blasted", "rebuild");
+  board.classList.remove("rebuild");
   let { w, h, n } = currentDims();
   const avail = wrap.clientWidth || window.innerWidth;
   if (w > h && avail < w * 25) { const t = w; w = h; h = t; }
@@ -1034,18 +1030,20 @@ function lose(hit, reason) {
   const N = G.w * G.h;
   const hx = hit >= 0 ? hit % G.w : 0, hy = hit >= 0 ? Math.floor(hit / G.w) : 0;
   for (let i = 0; i < N; i++) {
-    const s = G.state[i];
-    if (G.mine[i] && (s === 0 || s === 4)) {
+    if (!G.mine[i] && G.state[i] === 2) { cells[i].className = "cell open wrong"; cells[i].setAttribute("aria-label", coord(i) + ", falsche Flagge"); }
+  }
+  const showMines = (animate) => {
+    for (let i = 0; i < N; i++) {
+      const s = G.state[i];
+      if (!G.mine[i] || (s !== 0 && s !== 4)) continue;
       const d = hit >= 0 ? Math.max(Math.abs(i % G.w - hx), Math.abs(Math.floor(i / G.w) - hy)) : 0;
-      cells[i].className = "cell open mine" + (motion ? " drop" : "");
+      cells[i].className = "cell open mine" + (animate && motion ? " drop" : "");
       cells[i].style.animationDelay = Math.min(d * 40, 900) + "ms";
       cells[i].setAttribute("aria-label", coord(i) + ", Mine");
-    } else if (!G.mine[i] && s === 2) {
-      cells[i].className = "cell open wrong"; cells[i].setAttribute("aria-label", coord(i) + ", falsche Flagge");
     }
-  }
-  if (hit >= 0) { cells[hit].className = "cell open mine boom"; cells[hit].style.animationDelay = "0ms"; }
-  if (realFx()) blowUp(hit); else { shake(); Sound.boom(0.8); }
+    if (hit >= 0) { cells[hit].className = "cell open mine boom"; cells[hit].style.animationDelay = "0ms"; }
+  };
+  if (realFx()) blowUp(hit, showMines); else { showMines(true); shake(); Sound.boom(0.8); }
   vibrate(60);
   bumpTally(false);
   const safe = N - G.n;
@@ -1054,23 +1052,19 @@ function lose(hit, reason) {
   updateHud(); updateSide();
 }
 
-function blowUp(hit) {
+function blowUp(hit, showMines) {
   const game = G;
   const c = FX.boardBlast(G, cells, hit, () => {
     if (G !== game) return;
     for (const el of cells) {
-      el.classList.remove("drop", "pop");
+      el.classList.remove("gone");
       const r = el.getBoundingClientRect();
       el.style.setProperty("--d", Math.round(Math.hypot(r.left - c.x, r.top - c.y) * 0.9));
     }
-    board.classList.remove("blasted");
+    showMines(false);
     board.classList.add("rebuild");
     rebuildTimer = setTimeout(() => board.classList.remove("rebuild"), 1600);
   });
-  const br = board.getBoundingClientRect();
-  board.style.setProperty("--sx", (c.x - br.left) + "px");
-  board.style.setProperty("--sy", (c.y - br.top) + "px");
-  board.classList.add("blasted");
 }
 
 function win() {
@@ -1266,7 +1260,7 @@ function renderSettings() {
   for (const b of $("qSeg").children) b.setAttribute("aria-pressed", String((b.dataset.q === "on") === prefs.question));
   $("fxNote").textContent = !motion && prefs.fx === "real"
     ? "Dein System wünscht weniger Bewegung. Deshalb bleibt die Explosion einfach."
-    : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Das ganze Feld fliegt weg." : "Minen erscheinen, das Feld wackelt kurz.";
+    : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Jedes Minenfeld fliegt in Stücken weg." : "Minen erscheinen, das Feld wackelt kurz.";
 }
 $("fxSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-fx]"); if (!b) return; prefs.fx = b.dataset.fx; savePrefs(); renderSettings(); });
 $("qSeg").addEventListener("click", (e) => {
