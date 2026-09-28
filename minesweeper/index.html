@@ -261,13 +261,6 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
         </div>
       </div>
       <div class="setting">
-        <span id="styleLabel">Klang</span>
-        <div class="seg" id="styleSeg" role="group" aria-labelledby="styleLabel">
-          <button type="button" data-style="classic">Klassisch</button>
-          <button type="button" data-style="pups">Pups</button>
-        </div>
-      </div>
-      <div class="setting">
         <span id="qLabel">Fragezeichen</span>
         <div class="seg" id="qSeg" role="group" aria-labelledby="qLabel">
           <button type="button" data-q="off">Aus</button>
@@ -330,7 +323,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
 
-const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true, question: true, soundStyle: "pups" }, store.get("mf:prefs", {}));
+const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true, question: true }, store.get("mf:prefs", {}));
 if (!MODES[prefs.mode]) prefs.mode = "classic";
 if (!PRESETS[prefs.diff] && prefs.diff !== "custom") prefs.diff = "beginner";
 const savePrefs = () => store.set("mf:prefs", prefs);
@@ -491,14 +484,24 @@ function dailyBoard(w, h, n, nb) {
 
 /* ---------- sound ---------- */
 const Sound = (() => {
-  let ctx = null, out = null, noise = null, lastAt = 0;
+  let ctx = null, out = null, boomBus = null, noise = null, lastAt = 0;
   function get() {
     if (!prefs.sound) return null;
     try {
       if (!ctx) {
         const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
         ctx = new AC();
-        out = ctx.createDynamicsCompressor(); out.connect(ctx.destination);
+        // limiter keeps loud blasts from clipping
+        out = ctx.createDynamicsCompressor();
+        out.threshold.value = -4; out.knee.value = 0; out.ratio.value = 20; out.attack.value = 0.001; out.release.value = 0.2;
+        out.connect(ctx.destination);
+        // saturation gives explosions their punch
+        boomBus = ctx.createWaveShaper();
+        const curve = new Float32Array(2048);
+        for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(3.2 * x) / Math.tanh(3.2); }
+        boomBus.curve = curve; boomBus.oversample = "2x";
+        const post = ctx.createGain(); post.gain.value = 1.15;
+        boomBus.connect(post).connect(out);
         const len = ctx.sampleRate * 2;
         noise = ctx.createBuffer(1, len, ctx.sampleRate);
         const d = noise.getChannelData(0);
@@ -508,26 +511,45 @@ const Sound = (() => {
       return ctx;
     } catch (e) { return null; }
   }
+  // Explosion: sharp crack, heavy sub thump, blast body and, for the main mine, a long rumble.
   function boom(power) {
     const a = get(); if (!a) return;
-    const nowMs = performance.now();
-    if (power < 1 && nowMs - lastAt < 90) return;
+    const nowMs = performance.now(), main = power >= 1;
+    if (!main && nowMs - lastAt < 45) return;
     lastAt = nowMs;
-    const t = a.currentTime;
-    const src = a.createBufferSource(); src.buffer = noise;
-    const lp = a.createBiquadFilter(); lp.type = "lowpass";
-    lp.frequency.setValueAtTime(300 + 2600 * power, t);
-    lp.frequency.exponentialRampToValueAtTime(70, t + 1.5);
-    const g = a.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.9 * power, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4 + 1.5 * power);
-    src.connect(lp).connect(g).connect(out); src.start(t); src.stop(t + 2);
+    const t = a.currentTime + 0.005, p = main ? 1 : 0.55 + 0.4 * power;
+    const env = (node, peak, attack, decay) => {
+      const g = a.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      node.connect(g).connect(boomBus); return g;
+    };
+    const noiseSrc = (dur) => { const n = a.createBufferSource(); n.buffer = noise; n.start(t, Math.random() * 0.5); n.stop(t + dur); return n; };
+    // crack
+    const hp = a.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 1200;
+    noiseSrc(0.12).connect(hp); env(hp, 1.4 * p, 0.001, main ? 0.09 : 0.05);
+    // body
+    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 0.9;
+    lp.frequency.setValueAtTime(main ? 6000 : 3500, t);
+    lp.frequency.exponentialRampToValueAtTime(90, t + (main ? 1.2 : 0.45));
+    noiseSrc(2).connect(lp); env(lp, 1.6 * p, 0.004, main ? 1.4 : 0.5);
+    // sub thump
     const o = a.createOscillator(); o.type = "sine";
-    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(26, t + 0.55);
-    const og = a.createGain();
-    og.gain.setValueAtTime(power, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
-    o.connect(og).connect(out); o.start(t); o.stop(t + 0.8);
+    o.frequency.setValueAtTime(main ? 140 : 170, t);
+    o.frequency.exponentialRampToValueAtTime(main ? 32 : 45, t + (main ? 0.5 : 0.25));
+    env(o, 2.2 * p, 0.003, main ? 0.8 : 0.3);
+    o.start(t); o.stop(t + 1);
+    if (main) {
+      // long rumble
+      const rl = a.createBiquadFilter(); rl.type = "lowpass"; rl.frequency.value = 160; rl.Q.value = 0.7;
+      const rs = noiseSrc(2.2); rs.playbackRate.value = 0.5; rs.connect(rl);
+      const g = a.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(1.8, t + 0.08);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+      rl.connect(g).connect(boomBus);
+    }
   }
   function tone(a, t, type, f0, f1, dur, vol) {
     const o = a.createOscillator(), g = a.createGain();
@@ -546,45 +568,6 @@ const Sound = (() => {
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(bp).connect(g).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
   }
-  // Synthesized fart: buzzy sawtooth through a resonant filter, chopped by a flutter
-  // so it rattles instead of humming. High pitch keeps it light and squeaky.
-  function pups(t, o) {
-    const a = ctx, dur = o.dur, steps = Math.max(64, Math.round(dur * 1200));
-    const env = new Float32Array(steps), pitch = new Float32Array(steps);
-    let ph = Math.random() * 6.28;
-    for (let k = 0; k < steps; k++) {
-      const x = k / (steps - 1);
-      const fl = o.flutter * (1 + (o.accel || 0) * x) * (1 + (Math.random() - 0.5) * 0.25);
-      ph += 2 * Math.PI * fl * dur / steps;
-      const flap = Math.pow(Math.max(0, Math.sin(ph)), 1.6);
-      const shape = Math.min(1, x / 0.06) * Math.pow(1 - x, o.tail || 0.6);
-      env[k] = Math.max(0.0001, o.vol * shape * (0.18 + 0.82 * flap));
-      pitch[k] = (o.f0 + (o.f1 - o.f0) * x) * (1 + (Math.random() - 0.5) * 0.12 + 0.08 * Math.sin(ph * 0.5));
-    }
-    const osc = a.createOscillator(); osc.type = "sawtooth";
-    osc.frequency.setValueCurveAtTime(pitch, t, dur);
-    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = o.cut || 1300; lp.Q.value = 5;
-    const g = a.createGain(); g.gain.setValueCurveAtTime(env, t, dur);
-    osc.connect(lp).connect(g).connect(out);
-    osc.start(t); osc.stop(t + dur + 0.02);
-    const src = a.createBufferSource(); src.buffer = noise;
-    const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = o.f0 * 2.2; bp.Q.value = 1.5;
-    const ng = a.createGain(); ng.gain.setValueCurveAtTime(env.map((v) => v * 0.55), t, dur);
-    src.connect(bp).connect(ng).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
-  }
-  const pupsFx = {
-    // same speed as the click, loud, rattling through; big openings rattle longer
-    reveal(count) { const a = get(); if (!a) return;
-      pups(a.currentTime, { dur: count > 8 ? Math.min(0.75, 0.14 + count / 160) : 0.13, f0: 300, f1: 210, flutter: 42, accel: -0.3, vol: 1, tail: 0.5 }); },
-    flag() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.2, f0: 520, f1: 700, flutter: 60, vol: 0.8, cut: 1900 }); },
-    question() { const a = get(); if (!a) return; const t = a.currentTime;
-      pups(t, { dur: 0.09, f0: 380, f1: 420, flutter: 55, vol: 0.7 });
-      pups(t + 0.13, { dur: 0.16, f0: 420, f1: 720, flutter: 65, vol: 0.75, cut: 2000 }); },
-    unmark() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.32, f0: 360, f1: 170, flutter: 30, accel: -0.5, vol: 0.8, tail: 1.2 }); },
-    deny() { const a = get(); if (!a) return; pups(a.currentTime, { dur: 0.22, f0: 150, f1: 130, flutter: 18, vol: 0.7, cut: 900 }); },
-    win() { const a = get(); if (!a) return; const t = a.currentTime;
-      [320, 400, 480, 640].forEach((f, k) => pups(t + k * 0.16, { dur: k === 3 ? 0.5 : 0.13, f0: f, f1: f * (k === 3 ? 1.25 : 1.05), flutter: 45, vol: 0.85 })); }
-  };
   const fx = {
     // short wooden tick; a bigger opening adds a soft sweep
     reveal(count) {
@@ -614,9 +597,7 @@ const Sound = (() => {
     win() { const a = get(); if (!a) return; const t = a.currentTime;
       [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); }
   };
-  const api = { boom, unlock: get };
-  for (const k of Object.keys(fx)) api[k] = (...args) => (prefs.soundStyle === "classic" ? fx : pupsFx)[k](...args);
-  return api;
+  return Object.assign({ boom, unlock: get }, fx);
 })();
 
 /* ---------- realistic explosion ---------- */
@@ -1282,18 +1263,12 @@ $("custom").addEventListener("submit", (e) => {
 function renderSettings() {
   for (const b of $("fxSeg").children) b.setAttribute("aria-pressed", String(b.dataset.fx === prefs.fx));
   for (const b of $("sndSeg").children) b.setAttribute("aria-pressed", String((b.dataset.snd === "on") === prefs.sound));
-  for (const b of $("styleSeg").children) b.setAttribute("aria-pressed", String(b.dataset.style === prefs.soundStyle));
   for (const b of $("qSeg").children) b.setAttribute("aria-pressed", String((b.dataset.q === "on") === prefs.question));
   $("fxNote").textContent = !motion && prefs.fx === "real"
     ? "Dein System wünscht weniger Bewegung. Deshalb bleibt die Explosion einfach."
     : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Das ganze Feld fliegt weg." : "Minen erscheinen, das Feld wackelt kurz.";
 }
 $("fxSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-fx]"); if (!b) return; prefs.fx = b.dataset.fx; savePrefs(); renderSettings(); });
-$("styleSeg").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-style]"); if (!b) return;
-  prefs.soundStyle = b.dataset.style; savePrefs(); renderSettings();
-  if (prefs.sound) Sound.reveal(1);
-});
 $("qSeg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-q]"); if (!b) return;
   prefs.question = b.dataset.q === "on"; savePrefs(); renderSettings();
