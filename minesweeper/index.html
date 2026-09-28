@@ -140,6 +140,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
   linear-gradient(45deg,transparent 44%,var(--boom) 44% 56%,transparent 56%),
   linear-gradient(-45deg,transparent 44%,var(--boom) 44% 56%,transparent 56%)}
 .cell.start::after{content:"";width:36%;height:36%;border-radius:50%;background:var(--good);animation:pulse 1.4s ease-in-out infinite}
+.cell.quest{color:var(--muted)}
 .cell.hinted{box-shadow:inset 0 0 0 2px var(--good)}
 .n1{color:var(--n1)}.n2{color:var(--n2)}.n3{color:var(--n3)}.n4{color:var(--n4)}
 .n5{color:var(--n5)}.n6{color:var(--n6)}.n7{color:var(--n7)}.n8{color:var(--n8)}
@@ -259,6 +260,13 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
           <button type="button" data-snd="on">An</button>
         </div>
       </div>
+      <div class="setting">
+        <span id="qLabel">Fragezeichen</span>
+        <div class="seg" id="qSeg" role="group" aria-labelledby="qLabel">
+          <button type="button" data-q="off">Aus</button>
+          <button type="button" data-q="on">An</button>
+        </div>
+      </div>
       <p class="small" id="fxNote">Realistisch: Feuerball, Druckwelle, Kettenreaktion. Das ganze Feld fliegt weg.</p>
     </section>
     <section class="card">
@@ -273,7 +281,7 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
       <h2>Steuerung</h2>
       <ul class="keys">
         <li><kbd>Klick</kbd><span>Feld aufdecken</span></li>
-        <li><kbd>Rechtsklick</kbd><span>Flagge setzen oder entfernen</span></li>
+        <li><kbd>Rechtsklick</kbd><span>Flagge, zweimal für Fragezeichen, dreimal leer</span></li>
         <li><kbd>Lang tippen</kbd><span>Flagge auf dem Handy</span></li>
         <li><kbd>Klick auf Zahl</kbd><span>Nachbarn aufdecken, wenn die Flaggen stimmen</span></li>
         <li><kbd>Pfeile · Leer</kbd><span>Feld wählen und aufdecken</span></li>
@@ -315,7 +323,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
 
-const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true }, store.get("mf:prefs", {}));
+const prefs = Object.assign({ mode: "classic", diff: "beginner", custom: { w: 20, h: 12, n: 40 }, fx: "real", sound: true, question: true }, store.get("mf:prefs", {}));
 if (!MODES[prefs.mode]) prefs.mode = "classic";
 if (!PRESETS[prefs.diff] && prefs.diff !== "custom") prefs.diff = "beginner";
 const savePrefs = () => store.set("mf:prefs", prefs);
@@ -514,7 +522,53 @@ const Sound = (() => {
     og.gain.setValueAtTime(power, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
     o.connect(og).connect(out); o.start(t); o.stop(t + 0.8);
   }
-  return { boom, unlock: get };
+  function tone(a, t, type, f0, f1, dur, vol) {
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(out); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function noiseHit(a, t, freq, q, dur, vol) {
+    const src = a.createBufferSource(); src.buffer = noise;
+    const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = q;
+    const g = a.createGain();
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp).connect(g).connect(out); src.start(t, Math.random()); src.stop(t + dur + 0.02);
+  }
+  const fx = {
+    // short wooden tick; a bigger opening adds a soft sweep
+    reveal(count) {
+      const a = get(); if (!a) return; const t = a.currentTime;
+      noiseHit(a, t, 2200, 1.2, 0.045, 0.5);
+      tone(a, t, "sine", 880, 620, 0.06, 0.18);
+      if (count > 8) {
+        const src = a.createBufferSource(); src.buffer = noise;
+        const bp = a.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.8;
+        bp.frequency.setValueAtTime(3200, t); bp.frequency.exponentialRampToValueAtTime(500, t + 0.35);
+        const g = a.createGain(), v = Math.min(0.28, 0.08 + count / 400);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+        src.connect(bp).connect(g).connect(out); src.start(t, Math.random()); src.stop(t + 0.45);
+      }
+    },
+    // flag goes in: a firm plop that rises
+    flag() { const a = get(); if (!a) return; const t = a.currentTime;
+      noiseHit(a, t, 900, 2, 0.05, 0.35);
+      tone(a, t, "triangle", 420, 760, 0.09, 0.3); tone(a, t + 0.07, "triangle", 760, 980, 0.08, 0.22); },
+    // question mark: two quick, curious beeps
+    question() { const a = get(); if (!a) return; const t = a.currentTime;
+      tone(a, t, "square", 660, 660, 0.05, 0.07); tone(a, t + 0.08, "square", 880, 990, 0.07, 0.07); },
+    // marker removed: falling blip
+    unmark() { const a = get(); if (!a) return; const t = a.currentTime; tone(a, t, "triangle", 620, 330, 0.1, 0.22); },
+    // chord with wrong flag count
+    deny() { const a = get(); if (!a) return; const t = a.currentTime; tone(a, t, "sawtooth", 150, 120, 0.12, 0.08); },
+    win() { const a = get(); if (!a) return; const t = a.currentTime;
+      [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); }
+  };
+  return Object.assign({ boom, unlock: get }, fx);
 })();
 
 /* ---------- realistic explosion ---------- */
@@ -565,7 +619,7 @@ const FX = (() => {
     const now = performance.now(); t0 = now; onDone = done;
     const N = G.w * G.h, rects = cells.map((c) => c.getBoundingClientRect());
     const S = Math.max(22, rects[0].width);
-    const colors = { tile: css("--tile"), hi: css("--tile-hi"), lo: css("--tile-lo"), open: css("--open"), accent: css("--accent"), font: css("--display") };
+    const colors = { ink: css("--ink"), tile: css("--tile"), hi: css("--tile-hi"), lo: css("--tile-lo"), open: css("--open"), accent: css("--accent"), font: css("--display") };
     for (let n = 1; n <= 8; n++) colors["n" + n] = css("--n" + n);
     if (hit < 0) {
       let best = Infinity; const cx = G.w / 2, cy = G.h / 2;
@@ -577,7 +631,7 @@ const FX = (() => {
       const r = rects[i], x = r.left + r.width / 2, y = r.top + r.height / 2;
       const dx = x - hx, dy = y - hy, d = Math.hypot(dx, dy) || 1;
       const s = G.state[i];
-      const base = { kind: s === 1 ? "open" : s === 2 ? "flag" : s === 3 ? "mine" : "tile", num: s === 1 ? G.adj[i] : 0 };
+      const base = { kind: s === 1 ? "open" : s === 2 ? "flag" : s === 3 ? "mine" : s === 4 ? "quest" : "tile", num: s === 1 ? G.adj[i] : 0 };
       const push = 1.25 / (1 + (d / S) * 0.3);
       const launch = now + d / 1.5;
       const pieces = d < S * 1.6 ? [[-.25, -.25], [.25, -.25], [-.25, .25], [.25, .25]] : [[0, 0]];
@@ -711,6 +765,9 @@ const FX = (() => {
       if (p.kind === "open" && p.num) {
         ctx.fillStyle = C["n" + p.num]; ctx.font = "800 " + Math.round(h * 0.58) + "px " + C.font;
         ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(p.num, 0, h * 0.03);
+      } else if (p.kind === "quest") {
+        ctx.fillStyle = C.ink; ctx.font = "800 " + Math.round(h * 0.58) + "px " + C.font;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("?", 0, h * 0.03);
       } else if (p.kind === "flag") {
         ctx.fillStyle = C.accent;
         ctx.fillRect(-w * 0.2, -h * 0.28, w * 0.07, h * 0.56);
@@ -809,6 +866,7 @@ function paint(i, anim, delay) {
   }
   else if (s === 2) { cls += " flag"; label += "Flagge"; }
   else if (s === 3) { cls += " open mine boom"; label += "Mine getroffen"; }
+  else if (s === 4) { cls += " quest"; txt = "?"; label += "Fragezeichen"; }
   if (anim && motion) { cls += " " + anim; el.style.animationDelay = (delay || 0) + "ms"; }
   el.className = cls; el.textContent = txt; el.setAttribute("aria-label", label);
 }
@@ -819,19 +877,28 @@ function act(i, flagIntent) {
   setFocus(i, false);
   const s = G.state[i];
   if (flagIntent) {
-    if (s === 0 || s === 2) toggleFlag(i);
+    if (s === 0 || s === 2 || s === 4) toggleFlag(i);
     else if (s === 1) chord(i);
     after(); return;
   }
   if (s === 2 || s === 3) return;
   if (s === 1) { chord(i); after(); return; }
   if (!G.started) { if (G.mode === "daily") begin(i); else firstClick(i); return; }
-  reveal(i); after();
+  const n = reveal(i);
+  if (n) Sound.reveal(n);
+  after();
 }
 
+// Right click cycles: covered, flag, question mark (if enabled), covered.
 function toggleFlag(i) {
-  if (G.state[i] === 0) { G.state[i] = 2; G.flags++; paint(i, "drop"); vibrate(15); }
-  else if (G.state[i] === 2) { G.state[i] = 0; G.flags--; paint(i); }
+  const s = G.state[i];
+  if (s === 0) { G.state[i] = 2; G.flags++; paint(i, "drop"); vibrate(15); Sound.flag(); }
+  else if (s === 2) {
+    G.flags--;
+    if (prefs.question) { G.state[i] = 4; paint(i, "drop"); Sound.question(); }
+    else { G.state[i] = 0; paint(i); Sound.unmark(); }
+  }
+  else if (s === 4) { G.state[i] = 0; paint(i); Sound.unmark(); }
 }
 
 function firstClick(i) {
@@ -877,32 +944,38 @@ function begin(i) {
   if (G.start >= 0) paint(G.start);
   startTimer();
   setStatus({ kind: "play" });
-  reveal(i); after();
+  const n = reveal(i);
+  if (n) Sound.reveal(n);
+  after();
 }
 
+// Opens a cell and flood-fills empty areas. Returns the number of opened cells.
 function reveal(i) {
-  if (G.state[i] !== 0) return;
-  if (G.mine[i]) { hitMine(i); return; }
+  if (G.state[i] !== 0 && G.state[i] !== 4) return 0;
+  if (G.mine[i]) { hitMine(i); return 0; }
   const q = [i], dist = [0]; G.state[i] = 1; G.opened++; paint(i, "pop", 0);
   for (let h = 0; h < q.length; h++) {
     const k = q[h];
     if (G.adj[k] !== 0) continue;
     for (const j of G.nb[k]) {
-      if (G.state[j] !== 0 || G.mine[j]) continue;
+      if ((G.state[j] !== 0 && G.state[j] !== 4) || G.mine[j]) continue;
       G.state[j] = 1; G.opened++;
       q.push(j); dist.push(dist[h] + 1);
       paint(j, "pop", Math.min(dist[h] + 1, 30) * 14);
     }
   }
+  return q.length;
 }
 
 function chord(i) {
   const k = G.adj[i]; if (!k) return;
   let f = 0; const cov = [];
-  for (const j of G.nb[i]) { if (G.state[j] === 2 || G.state[j] === 3) f++; else if (G.state[j] === 0) cov.push(j); }
+  for (const j of G.nb[i]) { if (G.state[j] === 2 || G.state[j] === 3) f++; else if (G.state[j] === 0 || G.state[j] === 4) cov.push(j); }
   if (!cov.length) return;
-  if (f !== k) { for (const j of cov) { cells[j].classList.remove("nudge"); void cells[j].offsetWidth; cells[j].classList.add("nudge"); } return; }
-  for (const j of cov) { if (G.over) break; reveal(j); }
+  if (f !== k) { for (const j of cov) { cells[j].classList.remove("nudge"); void cells[j].offsetWidth; cells[j].classList.add("nudge"); } Sound.deny(); return; }
+  let n = 0;
+  for (const j of cov) { if (G.over) break; n += reveal(j); }
+  if (n) Sound.reveal(n);
 }
 
 function hitMine(i) {
@@ -933,7 +1006,7 @@ function lose(hit, reason) {
   const hx = hit >= 0 ? hit % G.w : 0, hy = hit >= 0 ? Math.floor(hit / G.w) : 0;
   for (let i = 0; i < N; i++) {
     const s = G.state[i];
-    if (G.mine[i] && s === 0) {
+    if (G.mine[i] && (s === 0 || s === 4)) {
       const d = hit >= 0 ? Math.max(Math.abs(i % G.w - hx), Math.abs(Math.floor(i / G.w) - hy)) : 0;
       cells[i].className = "cell open mine" + (motion ? " drop" : "");
       cells[i].style.animationDelay = Math.min(d * 40, 900) + "ms";
@@ -974,8 +1047,9 @@ function blowUp(hit) {
 function win() {
   G.over = true; G.won = true; tick(); stopTimer();
   const N = G.w * G.h; let k = 0;
-  for (let i = 0; i < N; i++) if (G.mine[i] && G.state[i] === 0) { G.state[i] = 2; G.flags++; paint(i, "drop", Math.min(k++ * 12, 600)); }
+  for (let i = 0; i < N; i++) if (G.mine[i] && (G.state[i] === 0 || G.state[i] === 4)) { G.state[i] = 2; G.flags++; paint(i, "drop", Math.min(k++ * 12, 600)); }
   const t = finalTime();
+  Sound.win();
   bumpTally(true);
   const rec = saveRecord(t);
   const bvs = G.bv / Math.max(G.elapsed, 0.1);
@@ -1003,7 +1077,7 @@ function hint() {
   if (t == null) return;
   if (G.state[t] === 2) { G.state[t] = 0; G.flags--; }
   G.hints++; G.penalty += HINT_COST;
-  reveal(t);
+  Sound.reveal(reveal(t));
   cells[t].classList.add("hinted");
   setFocus(t, true);
   flash("Tipp: " + coord(t) + " ist sicher. " + HINT_COST + " Sekunden Aufschlag.");
@@ -1160,15 +1234,20 @@ $("custom").addEventListener("submit", (e) => {
 function renderSettings() {
   for (const b of $("fxSeg").children) b.setAttribute("aria-pressed", String(b.dataset.fx === prefs.fx));
   for (const b of $("sndSeg").children) b.setAttribute("aria-pressed", String((b.dataset.snd === "on") === prefs.sound));
+  for (const b of $("qSeg").children) b.setAttribute("aria-pressed", String((b.dataset.q === "on") === prefs.question));
   $("fxNote").textContent = !motion && prefs.fx === "real"
     ? "Dein System wünscht weniger Bewegung. Deshalb bleibt die Explosion einfach."
     : prefs.fx === "real" ? "Feuerball, Druckwelle und Kettenreaktion. Das ganze Feld fliegt weg." : "Minen erscheinen, das Feld wackelt kurz.";
 }
 $("fxSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-fx]"); if (!b) return; prefs.fx = b.dataset.fx; savePrefs(); renderSettings(); });
+$("qSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]"); if (!b) return;
+  prefs.question = b.dataset.q === "on"; savePrefs(); renderSettings();
+});
 $("sndSeg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-snd]"); if (!b) return;
   prefs.sound = b.dataset.snd === "on"; savePrefs(); renderSettings();
-  if (prefs.sound) Sound.unlock();
+  if (prefs.sound) { Sound.unlock(); Sound.flag(); }
 });
 
 $("newBtn").addEventListener("click", newGame);
