@@ -179,6 +179,14 @@ h1{margin:0;font:800 clamp(30px,4.2vw,44px)/1 var(--display);letter-spacing:-.02
 .item small{font-size:12px;color:var(--muted);line-height:1.35}
 .item .own{font:500 11.5px var(--mono);color:var(--muted)}
 .item .btn{grid-column:2;grid-row:1 / span 3;min-height:34px;padding:5px 10px;font-size:13px}
+.board.flagmode{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent)}
+.board.flagmode .cell:not(.open){background:linear-gradient(color-mix(in srgb,var(--tile-hi) 78%,var(--accent)),color-mix(in srgb,var(--tile) 80%,var(--accent)));cursor:cell}
+.board.flagmode .cell:not(.open):not(.flag):not(.quest):not(.start):not(.peek-mine)::after{content:"";width:50%;height:50%;-webkit-mask:var(--flag-mask) center/contain no-repeat;mask:var(--flag-mask) center/contain no-repeat;background:var(--accent);opacity:.3;transition:opacity .12s}
+.board.flagmode .cell:not(.open):not(.flag):hover::after{opacity:.85}
+.board.flagwave .cell:not(.open){animation:flagwave .32s ease-out both;animation-delay:calc(var(--w,0) * 14ms)}
+@keyframes flagwave{40%{transform:translateY(-3px) scale(1.06)}}
+.flag-tag{display:inline-flex;align-items:center;gap:6px;font:700 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent);padding:3px 8px;border-radius:4px}
+.flag-tag i{width:11px;height:11px;background:currentColor;-webkit-mask:var(--flag-mask) center/contain no-repeat;mask:var(--flag-mask) center/contain no-repeat}
 .board.armed .cell:not(.open){cursor:crosshair}
 .board.armed .cell:not(.open):hover{box-shadow:inset 0 0 0 2px var(--accent)}
 .cell.peek{box-shadow:inset 0 0 0 2px #3C9AD0}
@@ -654,6 +662,11 @@ const Sound = (() => {
     deny() { const a = get(); if (!a) return; const t = a.currentTime; tone(a, t, "sawtooth", 150, 120, 0.12, 0.08); },
     win() { const a = get(); if (!a) return; const t = a.currentTime;
       [523, 659, 784, 1047].forEach((f, k) => tone(a, t + k * 0.09, "triangle", f, f, 0.22, 0.22)); },
+    // flag mode: a latch click and a rising flutter when it turns on, falling when it turns off
+    flagMode(on) { const a = get(); if (!a) return; const t = a.currentTime;
+      noiseHit(a, t, on ? 4200 : 2600, 4, 0.03, 0.55);
+      if (on) { tone(a, t + 0.02, "square", 392, 392, 0.06, 0.09); tone(a, t + 0.08, "square", 587, 587, 0.06, 0.09); tone(a, t + 0.14, "triangle", 784, 880, 0.16, 0.2); }
+      else { tone(a, t + 0.02, "square", 587, 587, 0.06, 0.08); tone(a, t + 0.08, "triangle", 392, 330, 0.16, 0.18); } },
     coin() { const a = get(); if (!a) return; const t = a.currentTime;
       tone(a, t, "square", 988, 988, 0.07, 0.1); tone(a, t + 0.07, "square", 1319, 1319, 0.18, 0.1); },
     defuse() { const a = get(); if (!a) return; const t = a.currentTime;
@@ -933,9 +946,11 @@ function renderBoard() {
     b.type = "button"; b.className = "cell"; b.dataset.i = i;
     b.setAttribute("role", "gridcell");
     b.tabIndex = i === focusIdx ? 0 : -1;
+    b.style.setProperty("--w", (i % G.w) + Math.floor(i / G.w));
     cells[i] = b; paint(i); frag.appendChild(b);
   }
   board.replaceChildren(frag);
+  board.classList.toggle("flagmode", flagMode);
   sizeBoard();
 }
 
@@ -1388,7 +1403,7 @@ function playText() {
   if (G.fallback) bits.push("Raten möglich");
   if (G.mode === "hardcore") bits[2] = "Minenzahl geheim";
   if (G.mode === "arcade") bits.push(G.coinsRun + " Münzen gesammelt" + (G.shield ? " · Schild aktiv" : ""));
-  return bits.join(" · ");
+  return (flagMode ? '<span class="flag-tag"><i></i>Flaggen-Modus</span> ' : "") + bits.join(" · ");
 }
 function flash(text, kind) {
   setStatus({ kind: "play" });
@@ -1510,9 +1525,22 @@ $("sndSeg").addEventListener("click", (e) => {
 
 $("newBtn").addEventListener("click", newGame);
 $("hintBtn").addEventListener("click", hint);
-$("flagBtn").addEventListener("click", () => {
-  flagMode = !flagMode; $("flagBtn").setAttribute("aria-pressed", String(flagMode));
-});
+let waveTimer = null;
+function setFlagMode(on) {
+  flagMode = on;
+  $("flagBtn").setAttribute("aria-pressed", String(on));
+  board.classList.toggle("flagmode", on);
+  if (motion) {
+    clearTimeout(waveTimer);
+    board.classList.remove("flagwave"); void board.offsetWidth; board.classList.add("flagwave");
+    waveTimer = setTimeout(() => board.classList.remove("flagwave"), 900);
+  }
+  Sound.flagMode(on);
+  if (!G || G.over) return;
+  if (on) flash('<span class="flag-tag"><i></i>Flaggen-Modus</span> Ein Klick setzt jetzt eine Flagge. Klick auf «Flagge» oder F zum Beenden.');
+  else flash("Flaggen-Modus aus. Ein Klick deckt wieder auf.");
+}
+$("flagBtn").addEventListener("click", () => setFlagMode(!flagMode));
 statusEl.addEventListener("click", (e) => { if (e.target.closest("[data-new]")) newGame(); });
 $("shop").addEventListener("click", (e) => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buy(b.dataset.buy); });
 $("powerBar").addEventListener("click", (e) => { const b = e.target.closest("[data-power]"); if (b && !b.disabled) usePower(b.dataset.power); });
