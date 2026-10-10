@@ -7,19 +7,24 @@ Start über run.bat / run.sh oder direkt:
 from __future__ import annotations
 
 import html
-from datetime import date, timedelta
+import sqlite3
+from contextlib import closing
+from dataclasses import replace
+from datetime import date, timedelta, datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
-from valuepulse.config import LOOKAHEAD_DAYS, load_settings, masked_key, save_env_keys
+from valuepulse.config import LOOKAHEAD_DAYS, MODEL_VERSION, QUOTE_CONFIRM_MINUTES, load_settings, masked_key, save_env_keys
 from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
 from valuepulse.models import DashboardData, MatchView
 from valuepulse.monthcal import apply_day_click, month_weeks, shift_month, value_counts
 from valuepulse.pipeline import run
-from valuepulse.positions import STATUS_LABELS, add_position, list_positions, settle, summarize
+from valuepulse.positions import STATUS_LABELS, add_position, list_positions, settle, summarize, exposure_by_team
+from valuepulse.history import event_key
+from valuepulse.analytics_ui import render_analysis, render_quote_history
 from valuepulse.pro import build_pro_view
 from valuepulse.providers import check_api_keys
 from valuepulse.slip import STAKE_CAP, Slip, build_slip
@@ -251,14 +256,19 @@ _CHECK_TEXT = {
 }
 
 
-@st.cache_data(ttl=600, show_spinner=False)
 def _load(refresh_token: int, start_iso: str, end_iso: str) -> DashboardData:
     del refresh_token
     return run(date_from=date.fromisoformat(start_iso), date_to=date.fromisoformat(end_iso))
 
 
+def _invalidate_data() -> None:
+    st.session_state.pop("dashboard_data", None)
+    st.session_state.pop("slip_result", None)
+
+
 def _ensure_state() -> None:
     today = date.today()
+    st.session_state.setdefault("book_mode", "paper")
     if "search_from" not in st.session_state:
         st.session_state.search_from = today
         st.session_state.search_to = today + timedelta(days=LOOKAHEAD_DAYS)
@@ -294,6 +304,8 @@ def main() -> None:
         _render_dashboard(data)
     elif page == "strategy":
         _render_strategy(data)
+    elif page == "analysis":
+        render_analysis()
     elif page == "positions":
         _render_positions()
     elif page == "calendar":
@@ -326,9 +338,15 @@ def _sidebar() -> None:
                 st.rerun()
     _nav("strategy", "📈 Strategie & Tippschein")
     _nav("positions", "💼 Positionen")
+    _nav("analysis", "📉 Prognosen & Backtest")
     _nav("calendar", "🗓️ Kalender")
     _nav("settings", "⚙️ Einstellungen")
     _nav("help", "❓ Hilfe")
+    st.sidebar.selectbox("Positionsbuch", ["paper", "real", "legacy"], key="book_mode",
+        format_func=lambda mode: {"paper":"Paper-Trading", "real":"Echtpositionen (manuell)", "legacy":"Altbestand (Herkunft unbekannt)"}[mode])
+    st.sidebar.number_input("Bankroll (Einheiten)", min_value=1.0, value=100.0, step=10.0,
+        key="bankroll_" + st.session_state.book_mode)
+    st.sidebar.caption("Getrennte Bilanzen. Die App platziert keine Wetten.")
 
 
 def _nav(page: str, label: str) -> None:
@@ -342,8 +360,10 @@ def _data() -> DashboardData:
     token = int(st.session_state.get("vp_refresh", 0))
     start = st.session_state.search_from.isoformat()
     end = st.session_state.search_to.isoformat()
-    with st.spinner("Spiele und Quoten werden geladen …"):
-        return _load(token, start, end)
+    if "dashboard_data" not in st.session_state:
+        with st.spinner("Spiele und Quoten werden geladen …"):
+            st.session_state.dashboard_data = _load(token, start, end)
+    return st.session_state.dashboard_data
 
 
 def _render_dashboard(data: DashboardData) -> None:
@@ -365,7 +385,7 @@ def _render_dashboard(data: DashboardData) -> None:
     with right:
         if st.button("Daten aktualisieren", type="primary", width="stretch"):
             st.session_state.vp_refresh = int(st.session_state.get("vp_refresh", 0)) + 1
-            st.cache_data.clear()
+            _invalidate_data()
             st.rerun()
 
     _banner(data)
@@ -493,7 +513,7 @@ def _commit_range() -> None:
     st.session_state.search_to = end
     st.session_state.vp_refresh = int(st.session_state.get("vp_refresh", 0)) + 1
     st.session_state.range_phase = "start"
-    st.cache_data.clear()
+    _invalidate_data()
     st.rerun()
 
 
@@ -521,7 +541,7 @@ def _render_settings() -> None:
         football = str(st.session_state.get("form_fd", "")).strip()
         odds = str(st.session_state.get("form_odds", "")).strip()
         save_env_keys(football, odds)
-        st.cache_data.clear()
+        _invalidate_data()
         try:
             checked = check_api_keys(football, odds)
             st.session_state.key_status = _key_message(checked)
@@ -554,7 +574,7 @@ def _render_positions() -> None:
     settings = load_settings()
     conn = connect(settings.db_path)
     try:
-        rows = list_positions(conn)
+        rows = list_positions(conn, st.session_state.book_mode)
         summary = summarize(rows)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Gesamt G&V", _units(summary.pnl))
@@ -563,6 +583,22 @@ def _render_positions() -> None:
         c3.metric("Aktive Positionen", str(summary.open_count))
         roi = "—" if summary.roi is None else pct(summary.roi, 1)
         c4.metric("ROI / Yield", roi)
+        st.caption({"paper":"Paper-Trading: simulierte Einträge, getrennt von echten Positionen.",
+            "real":"Manuell dokumentierte Echtpositionen. Keine automatische Wettabgabe.",
+            "legacy":"Altbestand: Vor der Migration war die Herkunft nicht gespeichert. Diese Einträge zählen weder zu Paper noch Echt."}[st.session_state.book_mode])
+        bankroll = float(st.session_state.get("bankroll_"+st.session_state.book_mode,100.0))
+        st.metric("Gesamter offener Einsatz", _units(summary.open_stake), delta=f"{summary.open_stake/bankroll:.1%} der angegebenen Bankroll", delta_color="off")
+        if summary.open_stake > bankroll * .1:
+            st.warning("Mehr als 10 % der angegebenen Bankroll sind offen gebunden. Einzelne Kelly-Grenzen begrenzen die Gesamtexposition nicht.")
+        exposure = exposure_by_team(rows)
+        if exposure:
+            with st.expander("Offene Einsätze je Team"):
+                st.dataframe(pd.DataFrame(exposure))
+                st.caption("Der volle Schein-Einsatz ist jedem beteiligten Team zugeordnet; diese Zeilen nicht aufsummieren.")
+        if rows:
+            export = pd.DataFrame([vars(row) for row in rows])
+            st.download_button("Positionsbuch als CSV", export.to_csv(index=False).encode("utf-8-sig"),
+                f"valuepulse-{st.session_state.book_mode}.csv", "text/csv")
         open_rows = [row for row in rows if row.status == "open"]
         if open_rows:
             labels = [f"#{row.id} {row.match_label} · {row.pick_label}" for row in open_rows]
@@ -618,7 +654,7 @@ def _status_mark(status: str) -> str:
 def _render_slip(data: DashboardData) -> None:
     _page_title("Tippschein-Generator")
     st.markdown(
-        '<p class="vp-note">Aus den Value-Signalen mit mehr als 3 % Edge wird ein Schein gebaut. '
+        '<p class="vp-note">Aus den Value-Signalen mit mehr als 3 % EV wird ein Schein gebaut. '
         "Dieselbe Mannschaft kommt nur einmal vor. Der Button rechnet den Schein, "
         "die Regler allein noch nicht.</p>",
         unsafe_allow_html=True,
@@ -643,38 +679,58 @@ def _render_slip(data: DashboardData) -> None:
     }[risk_choice]
     st.caption(
         "Wenig Risiko: Trefferchance ab 55 % und Datenqualität ab 60. "
-        "Mittel: bestes Produkt aus Edge und Trefferchance. "
-        "Hoch: größter Edge, auch bei hoher Quote. "
+        "Mittel: EV × Trefferchance. Hoch: größter EV. "
+        "Alle Tipps: EV über 3 % bis 15 %, Einzelquote höchstens 8, Gesamtquote höchstens 100. "
         f"Der Gesamteinsatz ist ein Viertel-Kelly und höchstens {pct(STAKE_CAP[risk], 1)} der Bankroll."
     )
-    fingerprint = tuple(
-        (
-            match.competition,
-            match.home,
-            match.away,
-            match.kickoff.isoformat(),
-            match.assessment.pick,
-            round(match.assessment.edge, 5),
-            match.assessment.quality,
-        )
-        for match in data.matches
-    )
-    if st.button("Tippschein generieren", type="primary"):
-        st.session_state.slip_result = build_slip(data.matches, count=int(count), risk=risk)
-        st.session_state.slip_fingerprint = fingerprint
+    if st.button("Quoten prüfen & Tippschein generieren", type="primary"):
+        with st.spinner("Aktuelle Preise werden ohne Anzeige-Cache abgerufen …"):
+            fresh = _load(int(st.session_state.vp_refresh),st.session_state.search_from.isoformat(),st.session_state.search_to.isoformat())
+        st.session_state.dashboard_data = fresh
+        # Use the clock AFTER network IO. A match may have started during fetching.
+        st.session_state.slip_result = build_slip(fresh.matches, count=int(count), risk=risk,
+            now=datetime.now(timezone.utc), require_live=True)
+        if fresh.mode != "live":
+            st.warning(fresh.banner)
     slip = st.session_state.get("slip_result")
     if not isinstance(slip, Slip):
-        st.info("Noch kein Schein. Anzahl und Risiko einstellen, dann auf Tippschein generieren.")
+        st.info("Beim Generieren werden die Quoten erneut geladen. Demo, unbestätigte Preise und fehlende aktuelle Tabellen erzeugen keinen spielbaren Schein.")
         return
-    if st.session_state.get("slip_fingerprint") != fingerprint:
-        st.info("Die berechneten Spiele haben sich geändert. Bitte den Tippschein neu generieren.")
+    now = datetime.now(timezone.utc)
+    current = st.session_state.dashboard_data
+    selected = [match for match in current.matches if any(match.home==leg.home and match.away==leg.away and match.kickoff_label==leg.kickoff_label for leg in slip.legs)]
+    if slip.checked_at is None or (now-slip.checked_at).total_seconds() > QUOTE_CONFIRM_MINUTES*60 or any(match.kickoff <= now for match in selected):
+        st.warning("Die Bestätigung ist abgelaufen oder ein Spiel hat begonnen. Bitte erneut prüfen.")
         return
     if slip.requested != int(count) or slip.risk != risk:
-        st.caption("Die Einstellung oben ist noch nicht im Schein. Dafür erneut auf Tippschein generieren.")
+        st.info("Einstellungen geändert. Bitte den Schein erneut generieren.")
+        return
+    confirmed = build_slip(current.matches,count=slip.requested,risk=slip.risk,now=now,require_live=True)
+    if (confirmed.legs,confirmed.bookmaker) != (slip.legs,slip.bookmaker):
+        st.warning("Die gespeicherten Quoten erfüllen die Regeln nicht mehr. Bitte erneut prüfen.")
+        return
     _show_slip(slip)
+    if slip.legs and st.session_state.book_mode != "legacy":
+        bankroll = float(st.session_state.get("bankroll_"+st.session_state.book_mode,100.0))
+        amount = st.number_input("Schein-Einsatz zum Protokollieren (Einheiten)", min_value=0.01,
+            value=max(.01,round(bankroll*slip.stake,2)),step=.1,key=_copy_key(slip)+"-stake")
+        if st.button("Schein im gewählten Positionsbuch speichern", key=_copy_key(slip)+"-save"):
+            with closing(connect(load_settings().db_path)) as conn:
+                add_position(conn,sport="football",competition="Kombischein",match_label=" / ".join(f"{leg.home} – {leg.away}" for leg in slip.legs),
+                    kickoff=min(match.kickoff for match in selected).isoformat(),pick_label="Kombischein",odds=slip.combined_odds,
+                    probability=slip.combined_probability,stake=float(amount),mode=st.session_state.book_mode,
+                    bookmaker=slip.bookmaker,source="the-odds-api",model_version=MODEL_VERSION,
+                    legs=[vars(leg) for leg in slip.legs])
+            st.success("Schein protokolliert; keine Wette abgegeben.")
 
 
 def _show_slip(slip: Slip) -> None:
+    if slip.exclusions:
+        with st.expander("Warum Spiele ausgeschlossen wurden"):
+            for reason in slip.exclusions:
+                st.write(reason)
+    if slip.checked_at:
+        st.caption("Zuletzt geprüft: " + slip.checked_at.strftime("%d.%m.%Y %H:%M UTC"))
     if slip.warning:
         title, _, body = slip.warning.partition("\n")
         st.markdown(
@@ -701,7 +757,7 @@ def _show_slip(slip: Slip) -> None:
         st.markdown(f"**Spielbar bei:** {html.escape(slip.bookmaker)}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Gesamtquote", decimal_de(slip.combined_odds or 0.0))
-    c2.metric("Gesamt-Wahrscheinlichkeit", pct(slip.combined_probability or 0.0))
+    c2.metric("Modellchance bei Unabhängigkeit", pct(slip.combined_probability or 0.0))
     c3.metric("Empfohlener Gesamteinsatz", pct(slip.stake))
     cap_note = (
         f" Der Viertel-Kelly läge höher und ist auf {pct(slip.stake_cap, 1)} gedeckelt."
@@ -710,7 +766,7 @@ def _show_slip(slip: Slip) -> None:
     )
     st.caption(
         f"{slip.risk_label}: {len(slip.legs)} von {slip.requested} Spielen. "
-        "Gesamtquote und Gesamt-Wahrscheinlichkeit sind das Produkt der Einzelwerte."
+        "Die Gesamtchance nimmt unabhängige Ergebnisse an. Auch viele einzeln wahrscheinliche Tipps ergeben eine geringe Kombichance."
         f"{cap_note} Keine Wettberatung."
     )
     st.text_area("Schein zum Kopieren", value=slip.copy_text, height=220, key=_copy_key(slip))
@@ -733,11 +789,22 @@ def _render_pro(data: DashboardData) -> None:
     labels = [f"{match.home} – {match.away} ({match.kickoff_label})" for match in data.matches]
     choice = st.selectbox("Spiel", labels)
     match = data.matches[labels.index(choice)]
-    view = build_pro_view(match.assessment)
-    item = match.assessment
+    available = list(match.assessment.book_odds)
+    if not available:
+        st.info("Keine vollständigen Buchmacherquoten für diese Ansicht.")
+        return
+    book = st.selectbox("Buchmacher für Marge und faire Wahrscheinlichkeiten", available)
+    item = replace(match.assessment,bookmaker=book,odds=match.assessment.book_odds[book])
+    from valuepulse.model import expected_value
+    item.edge = expected_value(item.model_probs[item.pick],item.odds[item.pick])
+    line = next((line for line in match.books if line.bookmaker==book), None)
+    if line is None or line.source != "the-odds-api" or line.last_update is None or not 0 <= (datetime.now(timezone.utc)-line.last_update).total_seconds() <= QUOTE_CONFIRM_MINUTES*60:
+        item.quality = 0
+    view = build_pro_view(item)
+    render_quote_history(match)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Marge der besten Quoten", pct(view.margin))
-    c2.metric(f"Edge {item.pick_label}", pct(item.edge))
+    c1.metric("Marge dieses Buchmachers", pct(view.margin))
+    c2.metric(f"EV {item.pick_label}", pct(item.edge))
     c3.metric("Empfohlener Max-Einsatz", pct(view.recommended_stake[item.pick]))
     if view.margin < 0:
         st.caption(
@@ -750,7 +817,7 @@ def _render_pro(data: DashboardData) -> None:
         st.caption(
             f"Empfohlener Max-Einsatz: {pct(view.recommended_stake[item.pick])} des Budgets "
             f"auf {item.pick_label} bei Quote {decimal_de(item.odds[item.pick])}. "
-            "Das ist ein Viertel des vollen Kelly-Anteils."
+            "Viertel-Kelly, zusätzlich auf 1 % begrenzt und nur bei erfüllten Schutzregeln."
         )
     st.markdown(_pro_table(item, view), unsafe_allow_html=True)
     st.markdown("**Poisson-Matrix** · Wahrscheinlichkeit je Spielstand")
@@ -774,7 +841,7 @@ def _key_message(checked: dict[str, str]) -> str:
             "Liegt im gewählten Zeitraum kein Spiel, werden die nächsten gelieferten Spiele gezeigt."
         )
     if "fehlt" in (checked.get("football"), checked.get("odds")):
-        return "Gespeichert. Der Demo-Modus bleibt aktiv, weil mindestens ein Schlüssel fehlt."
+        return "Gespeichert. Fehlende Quellen können gespeicherte Daten oder Demo auslösen; spielbare Tipps benötigen aktuelle Tabellen und Quoten."
     return f"Gespeichert. Football-Data: {football}. The Odds API: {odds}."
 
 
@@ -813,7 +880,7 @@ def _overview_table(matches: list[MatchView]) -> str:
                 "Spiel": f"{match.home} – {match.away}",
                 "Liga": match.competition,
                 "Anpfiff": match.kickoff_label,
-                "Edge": pct(match.assessment.edge),
+                "EV": pct(match.assessment.edge),
                 "Qualität": f"{match.assessment.quality} %",
             }
             for match in matches
@@ -833,8 +900,8 @@ def _pro_table(item, view) -> str:
                 "Roh": pct(1.0 / item.odds[key], 0),
                 "Shin": pct(view.shin[key], 0),
                 "Power": pct(view.power[key], 0),
-                "Edge roh": pct(view.edge_raw[key]),
-                "Edge Shin": pct(view.edge_shin[key]),
+                "EV": pct(view.edge_raw[key]),
+                "Abstand zu Shin (Prozentpunkte)": pct(view.edge_shin[key]).replace("%", "pp"),
                 "Max-Einsatz": pct(view.recommended_stake[key]),
             }
         )
@@ -892,29 +959,40 @@ def _card(match: MatchView) -> None:
     """
     st.markdown(body, unsafe_allow_html=True)
     key = f"pos-{match.home}-{match.away}-{match.kickoff.isoformat()}"
-    if st.button("+ Tipp zu Positionen hinzufügen", key=key):
+    if st.button("+ Tipp im gewählten Buch protokollieren", key=key, disabled=item.is_demo or st.session_state.book_mode == "legacy"):
+
         _save_position(match)
 
 
 def _save_position(match: MatchView) -> None:
-    item = match.assessment
-    settings = load_settings()
-    conn = connect(settings.db_path)
-    try:
-        add_position(
-            conn,
-            sport=str(st.session_state.sport),
-            competition=match.competition,
-            match_label=f"{match.home} – {match.away}",
-            kickoff=match.kickoff.isoformat(),
-            pick_label=item.pick_label,
-            odds=float(item.odds[item.pick]),
-            probability=float(item.model_probs[item.pick]),
-            stake=float(st.session_state.position_stake),
-        )
-    finally:
-        conn.close()
-    st.success(f"{match.home} – {match.away} liegt jetzt unter Positionen.")
+    if match.assessment.is_demo or st.session_state.book_mode == "legacy":
+        st.warning("Demo-Beispiele und neue Einträge im Altbestand sind ausgeschlossen.")
+        return
+    with st.spinner("Quote wird vor dem Speichern erneut geprüft …"):
+        fresh = run(date_from=st.session_state.search_from,date_to=st.session_state.search_to)
+    st.session_state.dashboard_data = fresh
+    now=datetime.now(timezone.utc)
+    key=event_key(match.competition,match.home,match.away,match.kickoff)
+    updated=next((row for row in fresh.matches if event_key(row.competition,row.home,row.away,row.kickoff)==key),None)
+    # Preserve the selection the user chose. Other outcomes cannot replace it silently.
+    if updated is None:
+        st.warning("Spiel konnte nicht frisch bestätigt werden.")
+        return
+    validated=build_slip([updated],count=2,risk="mittel",now=now,require_live=True,only_pick=match.assessment.pick)
+    if not validated.legs:
+        st.warning("Der Tipp erfüllt mit den aktuellen Preisen die Schutzregeln nicht mehr.")
+        return
+    leg=validated.legs[0]
+    with closing(connect(load_settings().db_path)) as conn:
+        add_position(conn,sport=str(st.session_state.sport),competition=match.competition,
+            match_label=f"{match.home} – {match.away}",kickoff=match.kickoff.isoformat(),pick_label=leg.pick_label,
+            odds=leg.odds,probability=leg.probability,stake=float(st.session_state.position_stake),
+            mode=st.session_state.book_mode,bookmaker=validated.bookmaker,source="the-odds-api",
+            model_version=MODEL_VERSION,event_key=key,legs=[{"home":match.home,"away":match.away}])
+    st.success(f"Protokolliert: {leg.pick_label}, Quote {decimal_de(leg.odds)} bei {validated.bookmaker}. Keine Wette abgegeben.")
 
 
-main()
+try:
+    main()
+except (sqlite3.Error, OSError, ValueError) as exc:
+    st.error(f"Die Aktion konnte nicht abgeschlossen werden: {exc}. Die Datenbank wurde nicht ersetzt. Bitte Ursache prüfen und erneut versuchen.")

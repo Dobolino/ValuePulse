@@ -16,6 +16,7 @@ from valuepulse.config import LEAGUES, LOOKAHEAD_DAYS, STANDINGS_TTL_HOURS, Sett
 from valuepulse.db import connect, latest_quotes, load_standings, save_quotes, save_standings
 from valuepulse.demo import build_demo
 from valuepulse.model import assess, strength_from_table
+from valuepulse.history import record_predictions
 from valuepulse.models import BookLine, DashboardData, Fixture, MatchView, Quote, Standing
 from valuepulse.names import names_match, similarity
 from valuepulse.providers import (
@@ -48,13 +49,27 @@ def run(
     window = resolve_window(moment, date_from, date_to)
     http = client or default_client()
 
-    if not settings.has_live_keys:
+    if not settings.has_odds_key:
         missing = []
         if not settings.has_football_key:
             missing.append("FOOTBALL_DATA_API_KEY")
         if not settings.has_odds_key:
             missing.append("ODDS_API_KEY")
         reason = "Es fehlt: " + ", ".join(missing) + "."
+        if settings.db_path.exists():
+            try:
+                conn = connect(settings.db_path)
+                try:
+                    quotes = latest_quotes(conn)
+                    matches = _evaluate(_fixtures_from_quotes(quotes, window), load_standings(conn),
+                        quotes, moment, window, api_limited=True, is_demo=False)
+                    if matches:
+                        return DashboardData(mode="cache", banner=reason + " Gespeicherte Daten; keine Live-Bestätigung.",
+                            matches=matches, generated_at=moment)
+                finally:
+                    conn.close()
+            except Exception:
+                pass
         return _safe_demo(moment, reason, window)
 
     try:
@@ -63,14 +78,14 @@ def run(
         return _safe_demo(moment, f"Die lokale Datenbank ließ sich nicht öffnen ({exc}).", window)
 
     try:
-        return _collect(settings, http, conn, moment, window)
+        return _collect(settings, http, conn, moment, window, real_clock=now is None)
     except Exception as exc:
         return _safe_demo(moment, f"Unerwarteter Fehler bei den Live-Daten ({exc}).", window)
     finally:
         conn.close()
 
 
-def _collect(settings: Settings, client, conn, now: datetime, window: Window) -> DashboardData:
+def _collect(settings: Settings, client, conn, now: datetime, window: Window, *, real_clock: bool = False) -> DashboardData:
     warnings: list[str] = []
     fixtures: list[Fixture] = []
     standings: list[Standing] = []
@@ -87,7 +102,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     fresh_codes = {code for code, rows in cached_by_code.items() if _standings_fresh(rows, now)}
 
     for league in LEAGUES:
-        if league.get("fixtures") is False:
+        if not settings.has_football_key or league.get("fixtures") is False:
             continue
         if football_budget is not None and football_budget < 1:
             football_limited = True
@@ -114,7 +129,7 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
 
     # Tabellen nicht im selben Schwung wie die Spiele ziehen, wenn das Minutenlimit
     # schon eng ist. Eine gespeicherte Tabelle reicht, sonst rechnet das Modell neutral.
-    if not football_limited:
+    if settings.has_football_key and not football_limited:
         for league in LEAGUES:
             if league.get("fixtures") is False:
                 continue
@@ -139,6 +154,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
 
     if standings:
         save_standings(conn, standings, now)
+        for row in standings:
+            row.updated_at = now
         fresh_codes = {row.competition_code for row in standings}
         standings.extend(row for row in cached_standings if row.competition_code not in fresh_codes)
 
@@ -171,6 +188,9 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
                 continue
             warnings.append(f"{league['name']}: Quoten nicht ladbar ({exc}).")
 
+    # The prediction is recorded after IO, never backdated to request start.
+    if real_clock:
+        now = datetime.now(timezone.utc)
     used_cache = False
     used_next = False
     if not quotes and later_quotes:
@@ -182,6 +202,14 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
             warnings.append(_next_games_message(quotes))
     if quotes:
         save_quotes(conn, quotes, now)
+        # Preserve league coverage when only part of the live requests succeed.
+        live_competitions = {quote.competition for quote in quotes}
+        missing = [quote for quote in latest_quotes(conn) if quote.competition not in live_competitions
+                   and window.contains(quote.kickoff) and quote.kickoff > now]
+        quotes.extend(missing)
+        if missing:
+            used_cache = True
+            warnings.append("Fehlende Ligen wurden aus gespeicherten Quoten ergänzt.")
     else:
         cached = latest_quotes(conn)
         if cached:
@@ -220,6 +248,8 @@ def _collect(settings: Settings, client, conn, now: datetime, window: Window) ->
     )
     if not matches:
         return _safe_demo(now, "Quoten und Spiele ließen sich keinem gemeinsamen Spiel zuordnen.", window)
+
+    record_predictions(conn, matches, standings, now)
 
     if used_next:
         mode = "eingeschraenkt"
@@ -348,7 +378,7 @@ def _evaluate(
     for fixture in fixtures:
         if not window.contains(fixture.kickoff):
             continue
-        if not is_demo and fixture.kickoff < now - timedelta(hours=3):
+        if not is_demo and fixture.kickoff <= now:
             continue
         table = _table_for(fixture, standings)
         attached = _attach_quotes(fixture, quotes)
@@ -359,7 +389,7 @@ def _evaluate(
             now=now,
             api_limited=api_limited,
             is_demo=is_demo,
-            stale_table=model.used_table and _table_is_stale(table, now),
+            stale_table=model.used_table and (_table_is_stale(table, now) or not _season_covers(table,fixture.kickoff.date())),
         )
         if result is None:
             continue
@@ -392,7 +422,18 @@ def _standings_fresh(rows: list[Standing], now: datetime) -> bool:
     return not _table_is_stale(rows, now)
 
 
+def _season_covers(rows: list[Standing], day: date) -> bool:
+    if not rows:
+        return False
+    try:
+        return all(date.fromisoformat(row.season) <= day <= date.fromisoformat(row.season_end) for row in rows)
+    except (ValueError, TypeError):
+        return False
+
+
 def _table_is_stale(rows: list[Standing], now: datetime) -> bool:
+    if not _season_covers(rows,now.date()):
+        return True
     moments: list[datetime] = []
     for row in rows:
         if row.updated_at is None:
@@ -401,9 +442,9 @@ def _table_is_stale(rows: list[Standing], now: datetime) -> bool:
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
         moments.append(moment)
-    if not moments:
-        return False
-    return now - min(moments) > timedelta(hours=STANDINGS_TTL_HOURS)
+    if not moments or any(row.updated_at is None for row in rows):
+        return True
+    return min(moments) > now or now - min(moments) > timedelta(hours=STANDINGS_TTL_HOURS)
 
 
 def _book_lines(quotes: list[Quote]) -> tuple[BookLine, ...]:
@@ -416,6 +457,8 @@ def _book_lines(quotes: list[Quote]) -> tuple[BookLine, ...]:
             quote.home_odds,
             quote.draw_odds,
             quote.away_odds,
+            quote.last_update,
+            quote.source,
         )
     return tuple(lines.values())
 

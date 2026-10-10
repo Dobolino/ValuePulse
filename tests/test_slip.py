@@ -1,167 +1,108 @@
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+import pytest
 
 from valuepulse.models import Assessment, BookLine, MatchView
-from valuepulse.slip import build_slip, shortened_warning
+from valuepulse.slip import build_slip
+
+NOW = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
 
 
-NOW = datetime(2026, 9, 23, 15, 0, tzinfo=timezone.utc)
+def _match(home='Arsenal',away='Chelsea',*,p=.6,ev=.1,quality=90,book='Book',stamp=NOW,source='the-odds-api'):
+    probabilities={'home':p,'draw':(1-p)/2,'away':(1-p)/2}
+    prices={'home':(1+ev)/p,'draw':.92/((1-p)/2),'away':.92/((1-p)/2)}
+    item=Assessment('home','Heimsieg',ev,probabilities,prices,{k:1/v for k,v in prices.items()},
+        book,quality,[],'green','', '',used_table=True,book_odds={book:prices})
+    return MatchView('Premier League',NOW+timedelta(days=1),'morgen',home,away,item,
+        (BookLine(book,prices['home'],prices['draw'],prices['away'],stamp,source),))
 
 
-def _match(
-    home: str,
-    away: str,
-    *,
-    pick: str = "home",
-    probability: float = 0.60,
-    odds: float = 2.0,
-    edge: float = 0.08,
-    quality: int = 80,
-    signal: str = "green",
-    competition: str = "Premier League",
-) -> MatchView:
-    labels = {"home": "Heimsieg", "draw": "Unentschieden", "away": "Auswärtssieg"}
-    probs = {"home": 0.2, "draw": 0.2, "away": 0.2}
-    prices = {"home": 4.0, "draw": 4.0, "away": 4.0}
-    probs[pick] = probability
-    prices[pick] = odds
-    assessment = Assessment(
-        pick=pick,
-        pick_label=labels[pick],
-        edge=edge,
-        model_probs=probs,
-        odds=prices,
-        implied={key: 1.0 / value for key, value in prices.items()},
-        bookmaker="Buch",
-        quality=quality,
-        quality_notes=[],
-        signal=signal,
-        headline="Tipp",
-        explanation="",
-    )
-    return MatchView(
-        competition=competition,
-        kickoff=NOW,
-        kickoff_label="23.09. 17:00",
-        home=home,
-        away=away,
-        assessment=assessment,
-    )
+def build(matches, count=3, risk='hoch', **kwargs):
+    return build_slip(matches,count=count,risk=risk,now=NOW,**kwargs)
 
 
-def test_fuenf_angefordert_drei_vorhanden_kuerzt_den_schein():
-    matches = [
-        _match("Arsenal", "Chelsea", edge=0.09, probability=0.58),
-        _match("Liverpool", "Everton", edge=0.07, probability=0.56),
-        _match("Bayern", "Köln", edge=0.06, probability=0.57, competition="Bundesliga"),
-        _match("Roma", "Lecce", edge=0.02, probability=0.70, signal="red"),
-    ]
-    slip = build_slip(matches, count=5, risk="hoch")
+def test_kuerzung_team_integritaet_und_ev():
+    slip=build([_match(ev=.12),_match('Arsenal','Fulham',ev=.11),_match('Liverpool','Everton',ev=.08)],count=3)
+    assert len(slip.legs)==2 and slip.shortened
+    assert 'Spielschein gekürzt!' in slip.warning
+    assert slip.bookmaker=='Book'
+    assert [(leg.home,leg.away) for leg in slip.legs]==[('Arsenal','Chelsea'),('Liverpool','Everton')]
+    assert all(.03 < leg.edge <= .15 for leg in slip.legs)
+
+
+def test_wenig_und_mittel_ranking():
+    matches=[_match('A','B',p=.7,ev=.04),_match('C','D',p=.4,ev=.1),_match('E','F',p=.6,ev=.05)]
+    assert [leg.home for leg in build(matches,risk='wenig').legs]==['A','E']
+    assert [leg.home for leg in build(matches,risk='mittel').legs]==['C','E','A']
+    assert [leg.home for leg in build(matches,risk='hoch').legs]==['C','E','A']
+
+
+def test_kombi_und_kelly_cap():
+    slip=build([_match(p=.7,ev=.05),_match('Liverpool','Everton',p=.6,ev=.1)],count=2,risk='wenig')
+    assert slip.combined_odds==pytest.approx(1.5*(1.1/.6))
+    assert slip.combined_probability==pytest.approx(.42)
+    assert slip.stake==.01 and slip.stake_capped
+    assert 'Unabhängigkeit' in slip.copy_text
+
+
+def test_negative_ev_nach_buchmacherwechsel_ist_verboten():
+    first=_match(p=.55,ev=.1); second=_match('Liverpool','Everton',p=.4,ev=.1)
+    first.books=(BookLine('Bet365',1.8,3.4,4.2,NOW,'the-odds-api'),BookLine('Pinnacle',2.,3.3,4.,NOW,'the-odds-api'))
+    second.books=(BookLine('Bet365',1.9,3.4,4.,NOW,'the-odds-api'),BookLine('Pinnacle',1.7,3.5,4.4,NOW,'the-odds-api'))
+    slip=build([first,second],count=2)
+    assert all(leg.probability*leg.odds-1 > .03 for leg in slip.legs)
+    assert slip.bookmaker == "Pinnacle"
+    assert any(leg.pick_label == "Unentschieden" for leg in slip.legs)
+
+
+def test_spaetere_kandidaten_fuellen_gemeinsamen_buchmacher():
+    matches=[_match('A','B',book='A',ev=.14),_match('C','D',book='B',ev=.12),_match('E','F',book='B',ev=.10)]
+    slip=build(matches,count=2)
+    assert slip.bookmaker=='B' and len(slip.legs)==2
+
+
+def test_keine_gemischten_fallback_preise():
+    matches=[_match(book='A'),_match('Liverpool','Everton',book='B')]
+    for match in matches: match.books=()
+    assert not build(matches).legs
+
+
+@pytest.mark.parametrize('change', ['low_quality','demo','no_table','stale_table','started','unknown_stamp','old_quote','future_stamp','cache','excess_ev','longshot','nan'])
+def test_unspielbare_kandidaten_gesperrt(change):
+    match=_match()
+    if change=='low_quality': match.assessment.quality=0
+    if change=='demo': match.assessment.is_demo=True
+    if change=='no_table': match.assessment.used_table=False
+    if change=='stale_table': match.assessment.stale_table=True
+    if change=='started': match.kickoff=NOW
+    if change=='unknown_stamp': match.books=(replace(match.books[0],last_update=None),)
+    if change=='old_quote': match.books=(replace(match.books[0],last_update=NOW-timedelta(minutes=16)),)
+    if change=='future_stamp': match.books=(replace(match.books[0],last_update=NOW+timedelta(minutes=1)),)
+    if change=='cache': match.books=(replace(match.books[0],source='cache'),)
+    if change=='excess_ev': match=_match(ev=.3)
+    if change=='longshot': match=_match(p=.1,ev=.1)
+    if change=='nan': match.books=(replace(match.books[0],home=float('nan')),)
+    assert not build([match],require_live=True).legs
+
+
+def test_buchmacher_quote_hat_eigenes_alter():
+    match=_match()
+    match.books=(replace(match.books[0],bookmaker='old',last_update=NOW-timedelta(days=2)),replace(match.books[0],bookmaker='fresh'))
+    assert build([match],require_live=True).bookmaker=='fresh'
+
+
+def test_quote_100_und_anzahl_zwei_bis_zehn():
+    matches=[_match(f'H{i}',f'A{i}',p=.9,ev=.1) for i in range(12)]
+    assert len(build(matches,count=1).legs)==2
+    assert len(build(matches,count=99).legs)==10
+    long=[_match(f'H{i}',f'A{i}',p=.16,ev=.1) for i in range(10)]
+    slip=build(long,count=10)
+    assert slip.combined_odds <= 100 and all(leg.odds<=8 for leg in slip.legs)
     assert slip.shortened
-    assert len(slip.legs) == 3
-    assert slip.requested == 5
-    assert slip.warning == shortened_warning(3, 5)
-    assert "Spielschein gekürzt!" in slip.warning
-    assert "Es wurden nur 3 qualifizierte Spiele mit ausreichendem Value gefunden (angefordert: 5)." in slip.warning
-    assert "Roma" not in slip.copy_text
 
 
-def test_wenig_risiko_nimmt_nur_hohe_chance_und_solide_qualitaet():
-    matches = [
-        _match("A", "B", probability=0.70, quality=80, edge=0.04, odds=1.50),
-        _match("C", "D", probability=0.54, quality=90, edge=0.12, odds=2.40),
-        _match("E", "F", probability=0.66, quality=45, edge=0.08, odds=1.70),
-        _match("G", "H", probability=0.62, quality=70, edge=0.05, odds=1.80),
-    ]
-    slip = build_slip(matches, count=3, risk="wenig")
-    names = [(leg.home, leg.away) for leg in slip.legs]
-    assert names == [("A", "B"), ("G", "H")]
-    assert slip.shortened
-    assert "angefordert: 3" in slip.warning
-
-
-def test_mittel_sortiert_nach_edge_mal_trefferchance():
-    matches = [
-        _match("A", "B", edge=0.04, probability=0.60),
-        _match("C", "D", edge=0.10, probability=0.40),
-        _match("E", "F", edge=0.05, probability=0.50),
-    ]
-    slip = build_slip(matches, count=3, risk="mittel")
-    assert [(leg.home, leg.away) for leg in slip.legs] == [("C", "D"), ("E", "F"), ("A", "B")]
-    assert slip.shortened is False
-    assert slip.warning == ""
-
-
-def test_hoch_sortiert_nach_absolutem_edge():
-    matches = [
-        _match("A", "B", edge=0.04, probability=0.70, odds=1.40),
-        _match("C", "D", edge=0.15, probability=0.28, odds=5.50),
-        _match("E", "F", edge=0.09, probability=0.40, odds=3.20),
-    ]
-    slip = build_slip(matches, count=2, risk="hoch")
-    assert [(leg.home, leg.away) for leg in slip.legs] == [("C", "D"), ("E", "F")]
-
-
-def test_dieselbe_mannschaft_kommt_nur_einmal_vor():
-    matches = [
-        _match("Arsenal", "Chelsea", edge=0.12),
-        _match("Arsenal", "Spurs", edge=0.10),
-        _match("Liverpool", "Everton", edge=0.08),
-    ]
-    slip = build_slip(matches, count=3, risk="hoch")
-    assert [(leg.home, leg.away) for leg in slip.legs] == [("Arsenal", "Chelsea"), ("Liverpool", "Everton")]
-    assert slip.shortened
-    assert "nur 2 qualifizierte Spiele" in slip.warning
-
-
-def test_gesamtquote_und_einsatz_sind_produkt_und_gedeckelter_viertel_kelly():
-    matches = [
-        _match("A", "B", probability=0.70, odds=1.50, edge=0.04, quality=90),
-        _match("C", "D", probability=0.60, odds=2.00, edge=0.10, quality=90),
-    ]
-    slip = build_slip(matches, count=2, risk="wenig")
-    assert abs(slip.combined_odds - 3.0) < 1e-9
-    assert abs(slip.combined_probability - 0.42) < 1e-9
-    assert slip.stake == slip.stake_cap == 0.01
-    assert slip.stake_capped
-    assert "Gesamtquote: 3,00" in slip.copy_text
-    assert "Gesamt-Wahrscheinlichkeit: 42,0 %" in slip.copy_text
-    assert "1,0 % der Bankroll" in slip.copy_text
-
-
-def test_kombi_nimmt_die_beste_quote_eines_buchmachers():
-    first = _match("A", "B", odds=2.40, probability=0.55, edge=0.10)
-    second = _match("C", "D", odds=3.20, probability=0.40, edge=0.08)
-    first.books = (
-        BookLine("Bet365", 1.80, 3.40, 4.20),
-        BookLine("Pinnacle", 2.00, 3.30, 4.00),
-    )
-    second.books = (
-        BookLine("Bet365", 1.90, 3.40, 4.00),
-        BookLine("Pinnacle", 1.70, 3.50, 4.40),
-        BookLine("Unibet", 3.20, 3.10, 2.40),
-    )
-    slip = build_slip([first, second], count=2, risk="hoch")
-    assert slip.bookmaker == "Bet365"
-    assert [leg.odds for leg in slip.legs] == [1.80, 1.90]
-    assert abs(slip.combined_odds - 3.42) < 1e-9
-    assert "Buchmacher: Bet365" in slip.copy_text
-    assert slip.shortened is False
-
-
-def test_ohne_gemeinsamen_buchmacher_wird_der_schein_gekuerzt():
-    first = _match("A", "B", edge=0.12, odds=2.2)
-    second = _match("C", "D", edge=0.08, odds=2.4)
-    first.books = (BookLine("Unibet", 2.2, 3.2, 3.4),)
-    second.books = (BookLine("Bet365", 2.4, 3.3, 3.1),)
-    slip = build_slip([first, second], count=2, risk="hoch")
-    assert [(leg.home, leg.odds) for leg in slip.legs] == [("A", 2.2)]
-    assert slip.bookmaker == "Unibet"
-    assert slip.shortened
-    assert "derselbe Buchmacher" in slip.warning
-
-
-def test_anzahl_wird_auf_zwei_bis_zehn_begrenzt():
-    matches = [_match(f"H{index}", f"A{index}", edge=0.05 + index / 100) for index in range(12)]
-    assert len(build_slip(matches, count=1, risk="hoch").legs) == 2
-    assert len(build_slip(matches, count=99, risk="hoch").legs) == 10
-    assert build_slip(matches, count=99, risk="hoch").requested == 10
+def test_grenzen_ohne_anzeigerundung():
+    assert not build([_match(ev=.03)]).legs
+    assert build([_match(ev=.03001)]).legs
+    assert build([_match(ev=.15)]).legs
+    assert not build([_match(ev=.15001)]).legs

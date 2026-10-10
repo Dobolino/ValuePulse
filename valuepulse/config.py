@@ -17,6 +17,12 @@ DB_PATH = ROOT / "valuepulse.sqlite3"
 
 # Vorteil gegenüber der Quote, ab dem ein Value-Signal entsteht.
 EDGE_MIN = 0.03
+MAX_SIGNAL_EV = 0.15
+MIN_SIGNAL_QUALITY = 60
+MAX_SINGLE_ODDS = 8.0
+MAX_COMBINED_ODDS = 100.0
+QUOTE_CONFIRM_MINUTES = 15
+MODEL_VERSION = "poisson-ev-v2"
 # Ab dieser Datenqualität darf ein Value-Signal grün werden.
 QUALITY_GREEN_MIN = 75
 # Quoten älter als diese Grenze senken die Datenqualität, stoppen aber nicht.

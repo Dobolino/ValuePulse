@@ -26,8 +26,7 @@ def _quotes(model_probs: dict[str, float], home_edge: float, age_hours: float, b
     updated = NOW - timedelta(hours=age_hours)
 
     def price(probability: float, edge: float) -> float:
-        implied = min(0.95, max(0.04, probability - edge))
-        return 1.0 / implied
+        return (1.0 + edge) / probability
 
     home_odds = price(model_probs["home"], home_edge)
     draw_odds = price(model_probs["draw"], -0.08)
@@ -70,9 +69,9 @@ def test_gruen_bei_frischem_value():
     result = assess(model=model, quotes=_quotes(model.probs, home_edge=0.08, age_hours=1), now=NOW)
     assert result is not None
     assert result.signal == "green"
-    assert result.headline.startswith("Tipp: Heimsieg | Edge:")
+    assert result.headline.startswith("Tipp: Heimsieg | EV:")
     assert "Modell sieht Heimsieg bei" in result.explanation
-    assert "Edge." in result.explanation
+    assert "EV (Modell × Quote − 1)" in result.explanation
 
 
 def test_exakt_drei_prozent_ist_kein_value():
@@ -80,7 +79,7 @@ def test_exakt_drei_prozent_ist_kein_value():
     result = assess(model=model, quotes=_quotes(model.probs, home_edge=0.03, age_hours=1), now=NOW)
     assert result is not None
     assert result.signal == "red"
-    assert result.headline == "Kein Vorteil gegenüber dem Buchmacher."
+    assert result.headline == "Kein freigegebenes Value-Signal."
 
 
 def test_veraltete_quote_wird_gelb_statt_abbruch():
@@ -134,3 +133,14 @@ def test_vierundzwanzig_stunden_genau_ist_noch_frisch():
         is_demo=False,
     )
     assert score == 90
+
+
+def test_ev_und_prozentpunktabstand_sind_getrennt():
+    from valuepulse.model import StrengthModel
+    from valuepulse.models import Quote
+    model=StrengthModel({'home':.6,'draw':.2,'away':.2},1.5,1.,True)
+    quote=Quote('Liga',NOW+timedelta(days=1),'A','B','Book',2.,3.5,4.,NOW,'the-odds-api')
+    result=assess(model=model,quotes=[quote],now=NOW)
+    assert abs(result.edge-.2)<1e-12
+    assert abs(result.probability_gap-.1)<1e-12
+    assert result.signal=='red'  # Raw EV remains visible; >15% is blocked, not clipped.

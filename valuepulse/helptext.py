@@ -82,15 +82,15 @@ Die Schlüssel liegen danach in der Datei `.env` auf deinem Rechner.
 ## Die Ampel
 
 - **Grün – Value-Tipp.** Das Modell sieht einen Vorteil über 3 % und die Daten
-  sind frisch. Beispiel: *Tipp: Heimsieg | Edge: 5,2 %*.
+  sind frisch. Beispiel: *Tipp: Heimsieg | EV: 5,2 %*.
 - **Gelb – eingeschränkt.** Ein Vorteil ist rechnerisch da, die Datenbasis ist
   aber dünn oder die Quote ist älter als 24 Stunden.
   Hinweis: *Tipp theoretisch möglich, aber Datenqualität verringert.*
-- **Grau/Rot – kein Value.** Der Markt ist fair oder teurer als das Modell.
-  Hinweis: *Kein Vorteil gegenüber dem Buchmacher.*
+- **Grau/Rot – kein freigegebener Tipp.** EV, Quoten oder Daten erfüllen die Schutzregeln nicht.
+  Hinweis: *Kein freigegebenes Value-Signal.*
 
 Unter jedem Spiel steht in Klartext, warum das Signal so ausfällt.
-Beispiel: *Modell sieht Heimsieg bei 60 %, Quote entspricht 52 % → 8,0 % Edge.*
+Beispiel: *Modell sieht Heimsieg bei 55 %, Quote 2,00 → 10,0 % EV (0,55 × 2,00 − 1).*
 
 ## Aktualisieren
 
@@ -124,4 +124,25 @@ Wenn es geklappt hat, steht dort: *ValuePulse wurde erfolgreich aktualisiert!*
 ValuePulse ist eine Rechenhilfe, keine Wettberatung.
 Quoten ändern sich. Ein angezeigter Edge ist keine Gewinnzusage.
 Setze nur Geld, dessen Verlust du verkraften kannst.
+
+## Neue Funktionen
+
+- **Prognosen & Backtest:** archivierte Vor-Anpfiff-Prognosen mit Modellversion
+  und Datenstand; Ergebnisse manuell erfassen; ROI, Brier, Log Loss und Kalibrierung.
+  Der Backtest wächst ab jetzt mit echten Abrufen, keine erfundene Historie.
+- **Positionsbuch in der Sidebar:** Paper-Trading, Echtpositionen und Altbestand
+  getrennt. Demo-Beispiele werden nicht protokolliert. Offene Einsätze und
+  Team-Überschneidungen sind sichtbar; CSV-Export ist enthalten.
+- **Strategie → Pro → Quotenverlauf:** gespeicherte Preise je Anbieter.
+- **Quoten prüfen & Tippschein generieren:** neuer Live-Abruf, nur bestätigte
+  Quoten bis 15 Minuten alt. EV über 3 % bis 15 %, Einzelquote höchstens 8,
+  Gesamtquote höchstens 100, Qualität ab 60 und aktuelle saisonale Tabellen.
+  Hoher EV wird nicht gekürzt, sondern bei Auffälligkeit gesperrt.
+- **Datenbank:** additive Migration erhält alte Positionen als Altbestand.
+  Fehler ersetzen die Datei nicht. Eine beschädigte Datei muss manuell
+  wiederhergestellt werden.
+
+Navigation und Kalenderklicks laden nicht automatisch neu. Die Oberfläche zeigt
+bis zum ausdrücklichen Abruf den letzten Datensatz. Die Kombichance setzt
+unabhängige Ergebnisse voraus; die App platziert keine Wetten.
 """

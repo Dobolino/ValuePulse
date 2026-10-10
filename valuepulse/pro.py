@@ -8,7 +8,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from valuepulse.model import poisson_pmf
+from valuepulse.model import poisson_pmf, expected_value
+from valuepulse.config import EDGE_MIN, MAX_SIGNAL_EV, MIN_SIGNAL_QUALITY, MAX_SINGLE_ODDS
 from valuepulse.models import Assessment
 
 _OUTCOMES = ("home", "draw", "away")
@@ -29,6 +30,11 @@ class ProView:
     matrix_mass: float
 
 
+def _validate_odds(odds: list[float]) -> None:
+    if len(odds) < 2 or any(not math.isfinite(v) or v <= 1 for v in odds):
+        raise ValueError("Mindestens zwei endliche Quoten größer als 1 erforderlich.")
+
+
 def bookmaker_margin(odds: list[float]) -> float:
     """Überrundung: Summe der rohen Quotenwahrscheinlichkeiten minus 1."""
     return sum(1.0 / decimal_odd for decimal_odd in odds) - 1.0
@@ -36,6 +42,8 @@ def bookmaker_margin(odds: list[float]) -> float:
 
 def kelly_fraction(probability: float, decimal_odds: float) -> float:
     """Voller Kelly-Anteil des Budgets. Negativ wird zu 0."""
+    if not math.isfinite(probability) or not 0 <= probability <= 1 or not math.isfinite(decimal_odds):
+        return 0.0
     net_odds = decimal_odds - 1.0
     if net_odds <= 0 or probability <= 0:
         return 0.0
@@ -54,6 +62,7 @@ def shin_probabilities(odds: list[float]) -> dict[str, float]:
     z ist der Anteil informierter Einsätze. Er wird so gewählt, dass die
     fairen Wahrscheinlichkeiten zusammen 100 % ergeben.
     """
+    _validate_odds(odds)
     implied = [1.0 / decimal_odd for decimal_odd in odds]
     total = sum(implied)
     if total <= 1.0000001:
@@ -80,17 +89,23 @@ def shin_probabilities(odds: list[float]) -> dict[str, float]:
     return dict(zip(_OUTCOMES, [value / scale for value in solved], strict=True))
 
 
-def power_probabilities(odds: list[float]) -> dict[str, float]:
+def power_probabilities(odds: list[float], outcomes: tuple[str, ...] | None = None) -> dict[str, float]:
     """Power-Methode: Exponent so wählen, dass die Quotenwahrscheinlichkeiten 100 % ergeben."""
+    labels = outcomes or (_OUTCOMES if len(odds) == 3 else ("over", "under") if len(odds) == 2 else tuple(str(i) for i in range(len(odds))))
+    if len(labels) != len(odds) or len(set(labels)) != len(labels):
+        raise ValueError("Jede Quote braucht einen eindeutigen Ausgang.")
+    _validate_odds(odds)
     implied = [1.0 / decimal_odd for decimal_odd in odds]
     total = sum(implied)
     if abs(total - 1.0) <= 1e-9:
-        return dict(zip(_OUTCOMES, implied, strict=True))
+        return dict(zip(labels, implied, strict=True))
 
     def total_at(exponent: float) -> float:
         return sum(probability**exponent for probability in implied)
 
-    low, high = 0.05, 8.0
+    low, high = 0.0, 1.0
+    while total_at(high) > 1:
+        high *= 2
     for _ in range(60):
         mid = (low + high) / 2
         if total_at(mid) > 1:
@@ -100,7 +115,7 @@ def power_probabilities(odds: list[float]) -> dict[str, float]:
     exponent = (low + high) / 2
     solved = [probability**exponent for probability in implied]
     scale = sum(solved) or 1.0
-    return dict(zip(_OUTCOMES, [value / scale for value in solved], strict=True))
+    return dict(zip(labels, [value / scale for value in solved], strict=True))
 
 
 def score_matrix(home_xg: float, away_xg: float, size: int = MATRIX_SIZE) -> tuple[list[list[float]], float]:
@@ -119,13 +134,19 @@ def score_matrix(home_xg: float, away_xg: float, size: int = MATRIX_SIZE) -> tup
 
 
 def build_pro_view(item: Assessment) -> ProView:
-    odds = [item.odds[key] for key in _OUTCOMES]
+    market = item.book_odds.get(item.bookmaker)
+    if market is None:
+        raise ValueError("Keine vollständigen Quoten eines einzelnen Buchmachers vorhanden.")
+    odds = [market[key] for key in _OUTCOMES]
     shin = shin_probabilities(odds)
     power = power_probabilities(odds)
-    edge_raw = {key: item.model_probs[key] - (1.0 / item.odds[key]) for key in _OUTCOMES}
+    edge_raw = {key: expected_value(item.model_probs[key], market[key]) for key in _OUTCOMES}
     edge_shin = {key: item.model_probs[key] - shin[key] for key in _OUTCOMES}
-    kelly = {key: kelly_fraction(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
-    recommended = {key: fractional_kelly(item.model_probs[key], item.odds[key]) for key in _OUTCOMES}
+    kelly = {key: kelly_fraction(item.model_probs[key], market[key]) for key in _OUTCOMES}
+    recommended = {key: min(0.01, fractional_kelly(item.model_probs[key], market[key]))
+                   if not item.is_demo and item.used_table and not item.stale_table and item.quality >= MIN_SIGNAL_QUALITY
+                   and EDGE_MIN < edge_raw[key] <= MAX_SIGNAL_EV and market[key] <= MAX_SINGLE_ODDS else 0.0
+                   for key in _OUTCOMES}
     if item.home_xg is None or item.away_xg is None:
         matrix, mass = [], 0.0
     else:

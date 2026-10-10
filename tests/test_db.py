@@ -38,27 +38,39 @@ def test_quote_wird_gespeichert_und_gelesen(tmp_path):
     assert rows[0].source == "cache"
 
 
-def test_beschaedigte_datei_wird_neu_angelegt(tmp_path):
+def test_beschaedigte_datei_bleibt_unveraendert(tmp_path):
     path = tmp_path / "valuepulse.sqlite3"
-    path.write_bytes(b"das ist keine datenbank")
-    conn = connect(path)
-    save_quotes(conn, [_quote()], datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc))
-    assert latest_quotes(conn)
-    conn.close()
-    assert path.with_suffix(".sqlite3.bak").exists() or path.with_suffix(path.suffix + ".bak").exists()
+    original = b"das ist keine datenbank"
+    path.write_bytes(original)
+    with pytest.raises(sqlite3.DatabaseError):
+        connect(path)
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.bak"))
 
 
-def test_fremdes_schema_wird_ersetzt(tmp_path):
+def test_unbekanntes_schema_bleibt_unveraendert(tmp_path):
     path = tmp_path / "valuepulse.sqlite3"
     conn = connect(path)
-    conn.execute("UPDATE meta SET value = '0' WHERE key = 'schema_version'")
+    conn.execute("UPDATE meta SET value = '99' WHERE key = 'schema_version'")
     conn.commit()
     conn.close()
+    original = path.read_bytes()
+    with pytest.raises(sqlite3.DatabaseError):
+        connect(path)
+    assert path.read_bytes() == original
 
-    healed = connect(path)
-    version = healed.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()["value"]
-    healed.close()
-    assert version == "1"
+
+def test_betriebsfehler_ersetzt_datei_nicht(tmp_path, monkeypatch):
+    path = tmp_path / "valuepulse.sqlite3"
+    conn = connect(path); conn.close()
+    original = path.read_bytes()
+    def fail(*args):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr("valuepulse.db._open", fail)
+    with pytest.raises(sqlite3.OperationalError, match="I/O"):
+        connect(path)
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.bak"))
 
 
 def test_datenbank_sperre_loescht_die_datei_nicht(tmp_path, monkeypatch):

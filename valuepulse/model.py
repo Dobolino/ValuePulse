@@ -1,8 +1,7 @@
 """Tor-Modell, Edge und Ampel.
 
 Das Modell ist bewusst klein: Aus der Tabelle werden erwartete Tore geschätzt,
-daraus per Poisson die Drei-Weg-Wahrscheinlichkeiten. Der Edge ist die Differenz
-zur Wahrscheinlichkeit, die in der besten Quote steckt.
+daraus per Poisson die Drei-Weg-Wahrscheinlichkeiten. Der Edge ist der erwartete Nettoertrag je eingesetzter Einheit: p × Quote − 1.
 
 Eine Quote älter als 24 Stunden oder ein API-Limit senkt nur die Datenqualität.
 Die Rechnung läuft trotzdem.
@@ -14,7 +13,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from valuepulse.config import EDGE_MIN, QUALITY_GREEN_MIN, STALE_ODDS_HOURS
+from valuepulse.config import EDGE_MIN, QUALITY_GREEN_MIN, STALE_ODDS_HOURS, MAX_SIGNAL_EV, MIN_SIGNAL_QUALITY, MAX_SINGLE_ODDS
 from valuepulse.models import Assessment, Quote, Standing
 from valuepulse.names import names_match
 
@@ -30,6 +29,15 @@ _AWAY_BOOST = 0.90
 # Zieht extreme Tabellenwerte zur Mitte, damit kleine Stichproben nicht übertreiben.
 _SHRINK = 0.65
 _MAX_GOALS = 8
+
+
+def expected_value(probability: float, odds: float) -> float:
+    """Expected net return per unit stake, independent of bookmaker margin."""
+    if not math.isfinite(probability) or not 0 <= probability <= 1:
+        raise ValueError("Wahrscheinlichkeit muss zwischen 0 und 1 liegen.")
+    if not math.isfinite(odds) or odds <= 1:
+        raise ValueError("Quote muss endlich und größer als 1 sein.")
+    return probability * odds - 1.0
 
 
 def pct(value: float, digits: int = 1) -> str:
@@ -85,7 +93,7 @@ class StrengthModel:
 
 def strength_from_table(home: str, away: str, table: list[Standing]) -> StrengthModel:
     """Erwartete Tore aus Toren und Gegentoren der Liga-Tabelle."""
-    usable = [row for row in table if row.played > 0]
+    usable = [row for row in table if row.played >= 5]
     home_row = next((row for row in usable if names_match(row.team, home)), None)
     away_row = next((row for row in usable if names_match(row.team, away)), None)
     if home_row is None or away_row is None or len(usable) < 4:
@@ -138,7 +146,7 @@ def best_prices(quotes: list[Quote]) -> tuple[dict[str, float], dict[str, str], 
     for quote in quotes:
         for key, attr in fields:
             price = getattr(quote, attr)
-            if price > prices[key]:
+            if math.isfinite(price) and price > prices[key]:
                 prices[key] = price
                 books[key] = quote.bookmaker
                 updated[key] = quote.last_update
@@ -188,7 +196,7 @@ def data_quality(
     elif stale_table:
         score -= 15
         notes.append(
-            "Die Tabelle ist älter als 24 Stunden. Die Datenqualität ist deshalb niedriger."
+            "Die Tabelle ist älter als 24 Stunden oder ihre Saison ist nicht passend belegt. Die Datenqualität ist deshalb niedriger."
         )
     if bookmaker_count < 2:
         score -= 10
@@ -217,10 +225,9 @@ def assess(
         return None
 
     implied = {key: 1.0 / prices[key] for key in prices}
-    edges = {key: model.probs[key] - implied[key] for key in prices}
-    # Dieselbe Rundung wie in der Anzeige: 3,0 % ist noch kein Value, 3,1 % schon.
-    threshold = round(EDGE_MIN * 100, 1)
-    value_keys = [key for key, value in edges.items() if round(value * 100, 1) > threshold]
+    edges = {key: expected_value(model.probs[key], prices[key]) for key in prices}
+    value_keys = [key for key, value in edges.items() if value > EDGE_MIN + 1e-12
+                  and value <= MAX_SIGNAL_EV + 1e-12 and prices[key] <= MAX_SINGLE_ODDS]
     if value_keys:
         pick = max(value_keys, key=lambda key: edges[key])
         is_value = True
@@ -246,15 +253,23 @@ def assess(
     if model.note:
         notes.insert(0, model.note)
 
+    if age is None or age < 0:
+        is_value = False
+        notes.append("Signal gesperrt: Quotenzeitpunkt fehlt oder liegt in der Zukunft.")
+    if max(edges.values()) > MAX_SIGNAL_EV:
+        notes.append("EV über 15 %: auffällige Ausgänge sind für Tipps gesperrt; Rohwerte bleiben sichtbar.")
+    if not is_demo and (quality < MIN_SIGNAL_QUALITY or not model.used_table or stale_table):
+        is_value = False
+        notes.append("Signal gesperrt: ausreichende, aktuelle Tabellen und Datenqualität ab 60 erforderlich.")
     if is_value and quality >= QUALITY_GREEN_MIN:
         signal = "green"
-        headline = f"Tipp: {OUTCOME_LABELS[pick]} | Edge: {pct(edge)}"
+        headline = f"Tipp: {OUTCOME_LABELS[pick]} | EV: {pct(edge)}"
     elif is_value:
         signal = "yellow"
         headline = "Tipp theoretisch möglich, aber Datenqualität verringert."
     else:
         signal = "red"
-        headline = "Kein Vorteil gegenüber dem Buchmacher."
+        headline = "Kein freigegebenes Value-Signal."
 
     explanation = _explain(pick, model, prices, books, implied, edge, quality, notes, is_value)
     return Assessment(
@@ -273,6 +288,12 @@ def assess(
         home_xg=model.home_xg,
         away_xg=model.away_xg,
         used_table=model.used_table,
+        is_demo=is_demo,
+        api_limited=api_limited,
+        stale_table=stale_table,
+        probability_gap=model.probs[pick] - implied[pick],
+        book_odds={q.bookmaker: {"home": q.home_odds, "draw": q.draw_odds, "away": q.away_odds}
+                   for q in quotes if all(math.isfinite(v) and v > 1.01 for v in (q.home_odds,q.draw_odds,q.away_odds))},
     )
 
 
@@ -291,7 +312,7 @@ def _explain(
     sentence = (
         f"Modell sieht {label} bei {pct(model.probs[pick], 0)}, "
         f"Quote {decimal_de(prices[pick])} entspricht {pct(implied[pick], 0)} "
-        f"→ {pct(edge)} Edge."
+        f"→ {pct(edge)} EV (Modell × Quote − 1)."
     )
     if model.used_table and model.home_xg is not None and model.away_xg is not None:
         goals = (
@@ -305,9 +326,7 @@ def _explain(
         verdict = " Der Vorteil liegt über der Schwelle von 3 %."
     else:
         verdict = (
-            " Der Vorteil liegt nicht über 3 %. "
-            "Keiner der drei Ausgänge schlägt die Quote deutlich genug. "
-            "Der Markt ist fair bepreist oder teurer, als es das Modell erwartet."
+            " Kein freigegebener Tipp: EV, Quote oder Daten erfüllen die Schutzregeln nicht."
         )
     extra = " ".join(notes)
     quality_line = f" Datenqualität: {quality} %."

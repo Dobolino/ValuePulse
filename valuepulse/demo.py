@@ -100,9 +100,9 @@ def _books(
 ) -> list[Quote]:
     nudged = dict(probs)
     if kind == "value-home":
-        nudged["home"] = max(0.08, probs["home"] - 0.10)
+        nudged["home"] = probs["home"] / 1.10
     elif kind == "value-away":
-        nudged["away"] = max(0.08, probs["away"] - 0.10)
+        nudged["away"] = probs["away"] / 1.10
     else:
         # Buchmacher-Marge: jede Quote ist etwas kürzer als das Modell.
         nudged = {key: min(0.92, value * 1.05) for key, value in probs.items()}

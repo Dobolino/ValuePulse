@@ -1,8 +1,4 @@
-"""SQLite-Speicher für jede abgerufene Quote.
-
-Die Datei ist ein Zwischenspeicher. Ist sie beschädigt oder stammt sie aus
-einer anderen Programmversion, legt ValuePulse sie beiseite und beginnt neu.
-"""
+"""Persistenter SQLite-Speicher. Fehler ersetzen oder löschen niemals Datenbanken."""
 
 from __future__ import annotations
 
@@ -13,7 +9,7 @@ from pathlib import Path
 
 from valuepulse.models import Quote, Standing
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 SNAPSHOT_KEEP_DAYS = 90
 CONNECT_TIMEOUT_SECONDS = 10.0
 LOCK_ATTEMPTS = 3
@@ -60,34 +56,18 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def _backup(path: Path) -> None:
-    if not path.exists():
-        return
-    bak = path.with_suffix(path.suffix + ".bak")
-    if bak.exists():
-        bak.unlink()
-    path.replace(bak)
-
-
 def connect(path: Path, *, timeout: float = CONNECT_TIMEOUT_SECONDS) -> sqlite3.Connection:
-    """Öffnet die Datenbank und heilt Schema oder Dateischäden.
-
-    Eine Sperre ist kein Schaden: die Datei bleibt, der Aufruf versucht es
-    kurz erneut. Nur eine beschädigte Datei oder ein fremdes Schema wird
-    beiseitegelegt.
-    """
+    """Öffnet und migriert additive Schemata. Sperren werden begrenzt wiederholt."""
     path.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(1, LOCK_ATTEMPTS + 1):
         try:
             return _open(path, timeout)
         except sqlite3.OperationalError as exc:
             if not _is_locked(exc):
-                return _rebuild(path, timeout)
+                raise
             if attempt == LOCK_ATTEMPTS:
                 raise
             time.sleep(LOCK_WAIT_SECONDS)
-        except sqlite3.DatabaseError:
-            return _rebuild(path, timeout)
     raise sqlite3.OperationalError("database is locked")
 
 
@@ -103,13 +83,8 @@ def _open(path: Path, timeout: float) -> sqlite3.Connection:
     return conn
 
 
-def _rebuild(path: Path, timeout: float) -> sqlite3.Connection:
-    _backup(path)
-    return _open(path, timeout)
-
-
 def _is_locked(exc: sqlite3.OperationalError) -> bool:
-    return "locked" in str(exc).lower()
+    return (getattr(exc, "sqlite_errorcode", 0) & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or "locked" in str(exc).lower()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -117,11 +92,18 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     try:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         version = row["value"] if row else None
-    except sqlite3.DatabaseError:
-        version = None
-    if version not in (None, SCHEMA_VERSION):
+    except sqlite3.OperationalError as exc:
+        if "no such table: meta" not in str(exc):
+            raise
+    if version not in (None, "1", SCHEMA_VERSION):
         raise sqlite3.DatabaseError(f"schema {version}")
     conn.executescript(_SCHEMA)
+    # Serialize additive migration across simultaneous connections.
+    conn.execute("BEGIN IMMEDIATE")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(standings)")}
+    for column in ("season", "season_end"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE standings ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -163,20 +145,14 @@ def latest_quotes(conn: sqlite3.Connection) -> list[Quote]:
     """Jüngste Quote je Spiel und Buchmacher, ohne Demo-Zeilen."""
     rows = conn.execute(
         """
-        SELECT o.*
-        FROM odds_snapshots o
-        JOIN (
-            SELECT home_team, away_team, kickoff, bookmaker, MAX(fetched_at) AS fetched_at
-            FROM odds_snapshots
-            WHERE source != 'demo'
-            GROUP BY home_team, away_team, kickoff, bookmaker
-        ) latest
-          ON o.home_team = latest.home_team
-         AND o.away_team = latest.away_team
-         AND o.kickoff = latest.kickoff
-         AND o.bookmaker = latest.bookmaker
-         AND o.fetched_at = latest.fetched_at
-        WHERE o.source != 'demo'
+        SELECT o.* FROM odds_snapshots o
+        WHERE o.source != 'demo' AND o.id = (
+            SELECT newer.id FROM odds_snapshots newer
+            WHERE newer.source != 'demo' AND newer.competition = o.competition
+              AND newer.home_team = o.home_team AND newer.away_team = o.away_team
+              AND newer.kickoff = o.kickoff AND newer.bookmaker = o.bookmaker
+            ORDER BY newer.fetched_at DESC, newer.id DESC LIMIT 1
+        )
         """
     ).fetchall()
     quotes: list[Quote] = []
@@ -207,8 +183,8 @@ def save_standings(conn: sqlite3.Connection, rows: list[Standing], updated_at: d
     conn.executemany(
         """
         INSERT INTO standings (
-            competition, team, played, points, goals_for, goals_against, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            competition, team, played, points, goals_for, goals_against, updated_at, season, season_end
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -219,6 +195,8 @@ def save_standings(conn: sqlite3.Connection, rows: list[Standing], updated_at: d
                 row.goals_for,
                 row.goals_against,
                 stamp,
+                row.season,
+                row.season_end,
             )
             for row in rows
         ],
@@ -237,6 +215,8 @@ def load_standings(conn: sqlite3.Connection) -> list[Standing]:
             goals_for=row["goals_for"],
             goals_against=row["goals_against"],
             updated_at=_parse_dt(row["updated_at"]),
+            season=row["season"],
+            season_end=row["season_end"],
         )
         for row in rows
     ]
