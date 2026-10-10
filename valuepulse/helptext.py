@@ -95,7 +95,8 @@ Beispiel: *Modell sieht Heimsieg bei 55 %, Quote 2,00 → 10,0 % EV (0,55 × 2,0
 ## Aktualisieren
 
 Neue Programmdateien holst du mit einem Doppelklick auf **update.bat** (Windows)
-oder im Terminal mit `./update.sh` (Mac und Linux).
+oder **update.command** (Mac). Im Terminal geht `./update.sh` (Mac und Linux).
+Falls macOS **update.command** blockiert: Rechtsklick, dann **Öffnen**, dann noch einmal **Öffnen**.
 Dabei wird immer die Hauptversion **main** geholt.
 Ein als ZIP gespeicherter Ordner ohne Git funktioniert trotzdem:
 die Dateien werden direkt geladen. Die Schlüssel in `.env` und die Datei

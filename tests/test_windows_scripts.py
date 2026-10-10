@@ -62,6 +62,15 @@ def test_findpython_liest_den_pfad_nicht_in_derselben_klammer():
     assert "py -%1" in text
 
 
+def test_update_command_ruft_update_sh_auf():
+    path = ROOT / "update.command"
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "./update.sh" in text
+    assert "Enter drücken zum Schließen" in text
+    assert path.stat().st_mode & stat.S_IXUSR
+
+
 def test_update_bat_laedt_zip_und_behaelt_eigene_dateien():
     path = ROOT / "update.bat"
     data = path.read_bytes()

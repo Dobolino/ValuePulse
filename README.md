@@ -54,7 +54,7 @@ Jede abgerufene Quote landet in `valuepulse.sqlite3`. Quoten, die älter als 24 
 
 Links liegt die Navigation. Im **Kalender** wählst du den Zeitraum. Gerechnet wird erst nach **Spiele für gewählten Zeitraum berechnen**. Unter **Positionen** siehst du, ob gespeicherte Tipps gewonnen haben.
 
-Neue Dateien holst du mit **update.bat** oder `./update.sh`. Dabei wird die Hauptversion **main** geholt. Ein ZIP-Ordner ohne Git lädt dieselben Dateien direkt; `.env` und `valuepulse.sqlite3` bleiben erhalten.
+Neue Dateien holst du mit **update.bat** (Windows) oder **update.command** (Mac). Im Terminal geht `./update.sh`. Dabei wird die Hauptversion **main** geholt. Ein ZIP-Ordner ohne Git lädt dieselben Dateien direkt; `.env` und `valuepulse.sqlite3` bleiben erhalten.
 
 ValuePulse ist eine Rechenhilfe, keine Wettberatung.
 
