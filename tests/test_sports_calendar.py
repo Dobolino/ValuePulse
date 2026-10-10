@@ -1,7 +1,17 @@
 from datetime import date, datetime, timezone
 
 from valuepulse.models import Assessment, MatchView
-from valuepulse.monthcal import apply_day_click, in_selected_range, month_weeks, shift_month, value_counts
+from valuepulse.monthcal import (
+    apply_day_click,
+    day_help,
+    in_selected_range,
+    month_weeks,
+    range_marks,
+    range_role,
+    selected_range_css,
+    shift_month,
+    value_counts,
+)
 from valuepulse.sports import SPORTS, provider_plan
 
 
@@ -46,6 +56,49 @@ def test_zeitraum_markiert_inklusive_raender():
     assert not in_selected_range(date(2026, 10, 9), start, end)
     assert not in_selected_range(date(2026, 10, 18), start, end)
     assert in_selected_range(date(2026, 10, 12), end, start)
+
+
+def test_anfang_mitte_und_ende_sind_unterschiedlich():
+    start, end = date(2026, 10, 10), date(2026, 10, 17)
+    assert range_role(start, start, end) == "start"
+    assert range_role(date(2026, 10, 11), start, end) == "mid"
+    assert range_role(date(2026, 10, 16), start, end) == "mid"
+    assert range_role(end, start, end) == "end"
+    assert range_role(date(2026, 10, 9), start, end) == "outside"
+    assert range_role(date(2026, 10, 12), end, start) == "mid"
+    assert range_role(start, start, start) == "single"
+
+    marks = range_marks(2026, 10, start, end)
+    assert marks[start] == "start"
+    assert marks[date(2026, 10, 13)] == "mid"
+    assert marks[end] == "end"
+    assert date(2026, 10, 9) not in marks
+    assert date(2026, 10, 18) not in marks
+
+    october = range_marks(2026, 10, date(2026, 10, 28), date(2026, 11, 3))
+    november = range_marks(2026, 11, date(2026, 10, 28), date(2026, 11, 3))
+    assert october[date(2026, 10, 28)] == "start"
+    assert october[date(2026, 10, 31)] == "mid"
+    assert date(2026, 11, 3) not in october
+    assert november[date(2026, 11, 1)] == "mid"
+    assert november[date(2026, 11, 3)] == "end"
+    assert date(2026, 10, 28) not in november
+
+    css = selected_range_css(2026, 10, start, end)
+    assert "/*role:start*/" in css
+    assert "/*role:mid*/" in css
+    assert "/*role:end*/" in css
+    assert ".st-key-day-2026-10-10" in css
+    assert ".st-key-day-2026-10-12" in css
+    assert ".st-key-day-2026-10-17" in css
+    assert ".st-key-day-2026-10-09" not in css
+    assert "border-radius:12px 4px 4px 12px" in css
+    assert "border-radius:4px 12px 12px 4px" in css
+    assert selected_range_css(2026, 11, start, end) == ""
+    assert "/*role:single*/" in selected_range_css(2026, 10, start, start)
+    assert day_help("start", 0) == "Start des gewählten Zeitraums"
+    assert day_help("mid", 1) == "1 Value-Signal · Liegt im gewählten Zeitraum"
+    assert day_help("end", 3).startswith("3 Value-Signale")
 
 
 def test_kalender_zaehlt_nur_value_signale_im_monat():

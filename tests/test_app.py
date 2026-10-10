@@ -1,6 +1,6 @@
 """Exercise the Streamlit UI without network access or real user data."""
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from dataclasses import replace
 
@@ -36,6 +36,39 @@ def test_navigation_and_calendar_do_not_fetch_again(tmp_path,monkeypatch):
     app.button(key='nav-positions').click().run()
     assert not app.exception and len(calls)==1
     assert any('Gesamter offener Einsatz'==metric.label for metric in app.metric)
+
+
+def test_kalender_unterscheidet_anfang_mitte_ende_und_badge(tmp_path, monkeypatch):
+    match = _match()
+    match.kickoff = datetime(2026, 10, 11, 15, tzinfo=timezone.utc)
+    app, calls = setup_app(
+        tmp_path,
+        monkeypatch,
+        DashboardData('demo', 'Demo', [match], generated_at=datetime(2026, 10, 10, tzinfo=timezone.utc)),
+    )
+    app.session_state['cal_year'] = 2026
+    app.session_state['cal_month'] = 10
+    app.session_state['pick_start'] = date(2026, 10, 10)
+    app.session_state['pick_end'] = date(2026, 10, 17)
+    app.button(key='nav-calendar').click().run()
+    assert not app.exception and len(calls) == 1
+    text = "\n".join(item.value for item in app.markdown)
+    assert "Gewählter Zeitraum" in text
+    assert "10.10.2026 bis 17.10.2026" in text
+    assert "/*role:start*/" in text and ".st-key-day-2026-10-10" in text
+    assert "/*role:mid*/" in text and ".st-key-day-2026-10-11" in text
+    assert "/*role:end*/" in text and ".st-key-day-2026-10-17" in text
+    assert ".st-key-day-2026-10-09" not in text
+    assert 'vp-cal-badge">1<' in text
+    day_buttons = [button for button in app.button if button.key and str(button.key).startswith('day-')]
+    assert day_buttons and all(button.label.isdigit() for button in day_buttons)
+    clicked = next(button for button in day_buttons if button.key == 'day-2026-10-11')
+    assert clicked.label == '11'
+    clicked.click().run()
+    assert not app.exception and len(calls) == 1
+    after = "\n".join(item.value for item in app.markdown)
+    assert "/*role:single*/" in after
+    assert "/*role:end*/" not in after
 
 
 def test_slip_rechecks_quotes_and_saves_separate_paper_position(tmp_path,monkeypatch):

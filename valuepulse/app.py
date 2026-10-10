@@ -21,7 +21,15 @@ from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
 from valuepulse.models import DashboardData, MatchView
-from valuepulse.monthcal import apply_day_click, in_selected_range, month_weeks, shift_month, value_counts
+from valuepulse.monthcal import (
+    apply_day_click,
+    day_help,
+    month_weeks,
+    range_role,
+    selected_range_css,
+    shift_month,
+    value_counts,
+)
 from valuepulse.pipeline import run
 from valuepulse.positions import (
     STATUS_LABELS,
@@ -244,33 +252,124 @@ _CSS = """
     .vp-slip-warn strong { color: #ffe7a3; display: block; margin-bottom: 0.25rem; }
     .vp-cal-month {
         text-align: center;
-        font-size: 1.35rem;
+        font-size: 1.15rem;
         font-weight: 700;
         line-height: 1.3;
-        margin: 0.35rem 0;
+        margin: 0;
         color: #f4f7fb;
     }
     .vp-cal-head {
         text-align: center;
-        color: #b7c6d6;
+        color: #9fb0c3;
         font-weight: 700;
-        margin: 0.2rem 0 0.35rem;
+        font-size: 0.82rem;
+        letter-spacing: 0.04em;
+        margin: 0 0 0.2rem;
     }
-    .vp-cal-count {
-        text-align: center;
+    .vp-cal-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.15rem;
+        align-items: center;
+        margin: 0.1rem 0 0.75rem;
+        color: #c5d2e0;
+        font-size: 0.88rem;
+        line-height: 1.4;
+    }
+    .vp-swatch {
+        display: inline-block;
+        width: 0.85rem;
+        height: 0.85rem;
+        border-radius: 4px;
+        margin-right: 0.35rem;
+        vertical-align: -0.12rem;
+    }
+    .vp-swatch-start { background: #00e699; }
+    .vp-swatch-mid { background: rgba(0, 230, 153, 0.35); box-shadow: inset 0 0 0 1px #1f8f68; }
+    .vp-swatch-end { background: #06281c; box-shadow: inset 0 0 0 2px #00e699; }
+    .vp-cal-badge {
+        display: inline-block;
+        min-width: 1.15rem;
+        padding: 0.02rem 0.38rem;
+        border-radius: 999px;
+        background: #123d2a;
         color: #8ef0b5;
-        font-size: 0.78rem;
-        line-height: 1.2;
-        min-height: 1rem;
-        margin: 0.1rem 0 0.55rem;
+        font-size: 0.72rem;
+        font-weight: 800;
+        line-height: 1.35;
+        text-align: center;
+        pointer-events: none;
+    }
+    .vp-cal-empty { min-height: 2.75rem; }
+    .st-key-cal-prev, .st-key-cal-next {
+        display: flex !important;
+        justify-content: center !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(.st-key-cal-prev) [data-testid="stColumn"],
+    [data-testid="stHorizontalBlock"]:has(.vp-cal-head) [data-testid="stColumn"],
+    [data-testid="stHorizontalBlock"]:has([class*="st-key-day-"]) [data-testid="stColumn"] {
+        min-width: 0 !important;
+    }
+    [data-testid="stColumn"]:has([class*="st-key-day-"]) [data-testid="stVerticalBlock"] {
+        gap: 0.1rem !important;
+        position: relative !important;
+    }
+    [data-testid="stColumn"]:has(.vp-cal-badge) {
+        position: relative !important;
+    }
+    [data-testid="stColumn"]:has([class*="st-key-day-"]) [data-testid="stElementContainer"]:has(.vp-cal-badge) {
+        position: absolute !important;
+        top: 0.22rem;
+        right: 0.28rem;
+        z-index: 4;
+        width: auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        pointer-events: none !important;
+    }
+    [class*="st-key-day-"] {
+        margin-bottom: 0 !important;
     }
     [class*="st-key-day-"] button,
     [class*="st-key-day-"] [data-testid^="stBaseButton"] {
         width: 100% !important;
-        min-height: 2.8rem;
-        border-radius: 12px;
-        font-weight: 700;
+        min-height: 2.75rem !important;
+        height: 2.75rem !important;
+        padding: 0 !important;
+        border-radius: 10px !important;
+        font-weight: 750 !important;
+        font-size: 1rem !important;
+        background: #1b1e22 !important;
+        background-color: #1b1e22 !important;
+        color: #f4f7fb !important;
+        border: 1px solid #3a414c !important;
+        box-shadow: none !important;
         justify-content: center !important;
+    }
+    [class*="st-key-day-"] button:hover,
+    [class*="st-key-day-"] [data-testid^="stBaseButton"]:hover {
+        border-color: #00e699 !important;
+        color: #ffffff !important;
+    }
+    @media (max-width: 720px) {
+        [class*="st-key-day-"] button,
+        [class*="st-key-day-"] [data-testid^="stBaseButton"] {
+            min-height: 2.45rem !important;
+            height: 2.45rem !important;
+            font-size: 0.85rem !important;
+        }
+        .vp-cal-head { font-size: 0.72rem; letter-spacing: 0; }
+        [data-testid="stColumn"]:has([class*="st-key-day-"]) [data-testid="stElementContainer"]:has(.vp-cal-badge) {
+            position: static !important;
+            top: auto;
+            right: auto;
+            width: 100% !important;
+            height: auto !important;
+            margin: 0.12rem 0 0 !important;
+            text-align: center !important;
+        }
     }
 </style>
 """
@@ -474,20 +573,35 @@ def _render_dashboard(data: DashboardData) -> None:
     )
 
 
+_CAL_LEGEND = """
+<div class="vp-cal-legend">
+  <span><i class="vp-swatch vp-swatch-start"></i>Starttag</span>
+  <span><i class="vp-swatch vp-swatch-mid"></i>im Zeitraum</span>
+  <span><i class="vp-swatch vp-swatch-end"></i>Endtag</span>
+  <span><span class="vp-cal-badge">3</span> Value-Signale</span>
+</div>
+"""
+
+
 def _render_calendar(data: DashboardData) -> None:
     _page_title("Sportkalender")
     st.markdown(
         '<p class="vp-note">Ein Klick auf einen Tag setzt nur den Zeitraum. '
         "Die Analyse startet erst mit <b>Spiele für gewählten Zeitraum berechnen</b>. "
-        "Markierte Tage sind der gewählte Zeitraum. "
-        "Grüne Zahlen darunter sind Value-Signale im zuletzt berechneten Fenster.</p>",
+        "Start, Tage dazwischen und Ende sind im Raster unterschiedlich markiert. "
+        "Die kleine Zahl ist die Anzahl der Value-Signale im zuletzt berechneten Fenster.</p>",
         unsafe_allow_html=True,
     )
     year = int(st.session_state.cal_year)
     month = int(st.session_state.cal_month)
-    prev_col, title_col, next_col = st.columns([1, 3, 1])
+    pick_start = st.session_state.pick_start
+    pick_end = st.session_state.pick_end
+    style = selected_range_css(year, month, pick_start, pick_end)
+    if style:
+        st.markdown(style, unsafe_allow_html=True)
+    prev_col, title_col, next_col = st.columns([1, 4, 1], vertical_alignment="center", wrap=False)
     with prev_col:
-        if st.button("←", key="cal-prev"):
+        if st.button("←", key="cal-prev", width="content"):
             st.session_state.cal_year, st.session_state.cal_month = shift_month(year, month, -1)
             st.rerun()
     with title_col:
@@ -496,34 +610,35 @@ def _render_calendar(data: DashboardData) -> None:
             unsafe_allow_html=True,
         )
     with next_col:
-        if st.button("→", key="cal-next"):
+        if st.button("→", key="cal-next", width="content"):
             st.session_state.cal_year, st.session_state.cal_month = shift_month(year, month, 1)
             st.rerun()
     st.markdown(
         f'<p class="vp-note"><b>Gewählter Zeitraum:</b> {html.escape(_picked_label())}</p>',
         unsafe_allow_html=True,
     )
+    st.markdown(_CAL_LEGEND, unsafe_allow_html=True)
     counts = value_counts(data.matches, year, month)
-    weekday_row = st.columns(7)
+    weekday_row = st.columns(7, gap="xsmall", wrap=False)
     for index, name in enumerate(("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")):
         weekday_row[index].markdown(
             f'<p class="vp-cal-head">{name}</p>',
             unsafe_allow_html=True,
         )
-    pick_start = st.session_state.pick_start
-    pick_end = st.session_state.pick_end
     for week in month_weeks(year, month):
-        cells = st.columns(7)
+        cells = st.columns(7, gap="xsmall", wrap=False)
         for index, day in enumerate(week):
             with cells[index]:
                 if day is None:
-                    st.write("")
+                    st.markdown('<div class="vp-cal-empty"></div>', unsafe_allow_html=True)
                     continue
-                selected = in_selected_range(day, pick_start, pick_end)
+                role = range_role(day, pick_start, pick_end)
+                mark = counts.get(day, 0)
                 if st.button(
                     str(day.day),
                     key=f"day-{day.isoformat()}",
-                    type="primary" if selected else "secondary",
+                    width="stretch",
+                    help=day_help(role, mark),
                 ):
                     start, end, phase = apply_day_click(
                         st.session_state.get("pick_start"),
@@ -534,11 +649,11 @@ def _render_calendar(data: DashboardData) -> None:
                     st.session_state.pick_end = end
                     st.session_state.range_phase = phase
                     st.rerun()
-                mark = counts.get(day, 0)
-                st.markdown(
-                    f'<p class="vp-cal-count">{mark if mark else "&nbsp;"}</p>',
-                    unsafe_allow_html=True,
-                )
+                if mark:
+                    st.markdown(
+                        f'<span class="vp-cal-badge">{mark}</span>',
+                        unsafe_allow_html=True,
+                    )
     start_col, end_col = st.columns(2)
     with start_col:
         st.date_input("Startdatum", key="pick_start", format="DD.MM.YYYY")
