@@ -7,6 +7,8 @@ oder storniert. Daraus entstehen Gewinn, Gewinnrate und ROI.
 from __future__ import annotations
 
 import sqlite3
+import math
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -33,6 +35,12 @@ class Position:
     stake: float
     status: str
     pnl: float | None
+    mode: str = "legacy"
+    bookmaker: str = ""
+    source: str = "legacy"
+    model_version: str = ""
+    event_key: str = ""
+    legs_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,7 @@ class Performance:
     settled_stake: float
     win_rate: float | None
     roi: float | None
+    open_stake: float = 0.0
 
 
 def ensure_positions(conn: sqlite3.Connection) -> None:
@@ -66,7 +75,21 @@ def ensure_positions(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    conn.commit()
+    # Old rows have unknown provenance: never silently label them as real bets.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(positions)")}
+        for name, default in (("mode","legacy"),("bookmaker",""),("source","legacy"),
+                              ("model_version",""),("event_key",""),("legs_json","[]")):
+            if name not in existing:
+                conn.execute(f"ALTER TABLE positions ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+        conn.execute("""CREATE TABLE IF NOT EXISTS position_changes (
+            id INTEGER PRIMARY KEY, position_id INTEGER NOT NULL, changed_at TEXT NOT NULL,
+            previous_status TEXT NOT NULL, status TEXT NOT NULL, pnl REAL NOT NULL)""")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def add_position(
@@ -81,10 +104,22 @@ def add_position(
     probability: float,
     stake: float,
     created_at: datetime | None = None,
+    mode: str = "paper",
+    bookmaker: str = "",
+    source: str = "manual",
+    model_version: str = "",
+    event_key: str = "",
+    legs: list[dict] | None = None,
 ) -> int:
-    if stake <= 0:
+    if mode not in {"paper", "real"}:
+        raise ValueError("Neue Positionen gehören zu Paper-Trading oder Echtpositionen.")
+    if source == "demo":
+        raise ValueError("Demo-Beispiele werden nicht im Positionsbuch gespeichert.")
+    if not math.isfinite(probability) or not 0 <= probability <= 1:
+        raise ValueError("Ungültige Wahrscheinlichkeit.")
+    if not math.isfinite(stake) or stake <= 0:
         raise ValueError("Der Einsatz muss größer als 0 sein.")
-    if odds <= 1:
+    if not math.isfinite(odds) or odds <= 1:
         raise ValueError("Die Quote muss über 1 liegen.")
     ensure_positions(conn)
     moment = created_at or datetime.now(timezone.utc)
@@ -92,8 +127,9 @@ def add_position(
         """
         INSERT INTO positions (
             created_at, sport, competition, match_label, kickoff,
-            pick_label, odds, probability, stake, status, pnl
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL)
+            pick_label, odds, probability, stake, status, pnl,
+            mode, bookmaker, source, model_version, event_key, legs_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, ?, ?)
         """,
         (
             moment.replace(microsecond=0).isoformat(),
@@ -105,6 +141,7 @@ def add_position(
             float(odds),
             float(probability),
             float(stake),
+            mode, bookmaker, source, model_version, event_key, json.dumps(legs or []),
         ),
     )
     conn.commit()
@@ -115,17 +152,22 @@ def settle(conn: sqlite3.Connection, position_id: int, status: str) -> None:
     if status not in {"won", "lost", "void"}:
         raise ValueError(f"Unbekanntes Ergebnis: {status}")
     ensure_positions(conn)
-    row = conn.execute("SELECT stake, odds FROM positions WHERE id = ?", (position_id,)).fetchone()
+    row = conn.execute("SELECT stake, odds, status FROM positions WHERE id = ?", (position_id,)).fetchone()
     if row is None:
         raise ValueError("Diese Position gibt es nicht.")
     pnl = _result_pnl(status, float(row["stake"]), float(row["odds"]))
-    conn.execute("UPDATE positions SET status = ?, pnl = ? WHERE id = ?", (status, pnl, position_id))
-    conn.commit()
+    with conn:
+        conn.execute("INSERT INTO position_changes(position_id,changed_at,previous_status,status,pnl) VALUES(?,?,?,?,?)",
+            (position_id,datetime.now(timezone.utc).isoformat(),row['status'],status,pnl))
+        conn.execute("UPDATE positions SET status = ?, pnl = ? WHERE id = ?", (status, pnl, position_id))
 
 
-def list_positions(conn: sqlite3.Connection) -> list[Position]:
+def list_positions(conn: sqlite3.Connection, mode: str | None = None) -> list[Position]:
     ensure_positions(conn)
-    rows = conn.execute("SELECT * FROM positions ORDER BY created_at DESC, id DESC").fetchall()
+    if mode is None:
+        rows = conn.execute("SELECT * FROM positions ORDER BY created_at DESC, id DESC").fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM positions WHERE mode=? ORDER BY created_at DESC, id DESC", (mode,)).fetchall()
     return [_position(row) for row in rows]
 
 
@@ -158,6 +200,7 @@ def summarize(positions: list[Position]) -> Performance:
         settled_stake=settled_stake,
         win_rate=win_rate,
         roi=roi,
+        open_stake=sum(row.stake for row in positions if row.status == "open"),
     )
 
 
@@ -183,4 +226,26 @@ def _position(row: sqlite3.Row) -> Position:
         stake=float(row["stake"]),
         status=row["status"],
         pnl=None if row["pnl"] is None else float(row["pnl"]),
+        mode=row["mode"], bookmaker=row["bookmaker"], source=row["source"],
+        model_version=row["model_version"], event_key=row["event_key"], legs_json=row["legs_json"],
     )
+
+
+def exposure_by_team(positions: list[Position]) -> list[dict]:
+    """One full position stake is at risk for each team involved (not additive across teams)."""
+    from valuepulse.names import canonical
+    grouped = {}
+    for position in positions:
+        if position.status != "open":
+            continue
+        seen = set()
+        for leg in json.loads(position.legs_json):
+            for team in (leg.get('home',''),leg.get('away','')):
+                key=canonical(team)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                entry=grouped.setdefault(key, {'Team':team,'Offene Positionen':0,'Einsatz':0.0})
+                entry['Offene Positionen']+=1
+                entry['Einsatz']+=position.stake
+    return sorted(grouped.values(),key=lambda item:item['Einsatz'],reverse=True)

@@ -8,3 +8,8 @@ valuepulse.sqlite3.bak
 *.log
 .valuepulse.pid
 .streamlit/secrets.toml
+
+.coverage
+htmlcov/
+coverage.json
+*.sqlite3-*

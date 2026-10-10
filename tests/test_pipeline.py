@@ -60,6 +60,7 @@ class FakeClient:
         if "/standings" in url:
             return FakeResponse(
                 {
+                    "season": {"startDate":"2026-07-01", "endDate":"2027-06-30"},
                     "standings": [
                         {
                             "type": "TOTAL",
@@ -131,7 +132,7 @@ def test_ohne_schluessel_startet_demo(tmp_path):
     assert any(match.assessment.signal == "red" for match in data.matches)
     assert all(match.assessment.signal != "green" for match in data.matches)
     assert any("Datenqualität verringert" in match.assessment.headline for match in data.matches)
-    assert any(match.assessment.headline == "Kein Vorteil gegenüber dem Buchmacher." for match in data.matches)
+    assert any(match.assessment.headline == "Kein freigegebenes Value-Signal." for match in data.matches)
 
 
 def test_live_speichert_quoten_und_findet_value(tmp_path):
@@ -143,7 +144,9 @@ def test_live_speichert_quoten_und_findet_value(tmp_path):
     assert path.exists()
     home = next(match for match in data.matches if match.home == "Arsenal FC")
     assert home.assessment.edge > 0.03
-    assert home.assessment.signal == "green"
+    assert home.assessment.edge > .15
+    assert home.assessment.signal == "red"
+    assert any("15 %" in note for note in home.assessment.quality_notes)
     assert "Modell sieht" in home.assessment.explanation
     assert {line.bookmaker for line in home.books} == {"Pinnacle", "Unibet"}
     assert client.calls > 0
@@ -431,6 +434,46 @@ def _seed_tables(path, updated_at):
             ("Chelsea", 10, 9, 16),
             ("Everton", 11, 10, 14),
         ):
-            rows.append(Standing(league["code"], name, 8, points, goals_for, goals_against))
+            rows.append(Standing(league["code"], name, 8, points, goals_for, goals_against, season="2026-07-01", season_end="2027-06-30"))
     save_standings(conn, rows, updated_at)
     conn.close()
+
+
+def test_safe_demo_survives_its_own_builder_failure(monkeypatch):
+    from valuepulse import pipeline
+    from valuepulse.window import resolve_window
+    def fail(*args,**kwargs): raise RuntimeError('injected demo failure')
+    monkeypatch.setattr(pipeline,'_from_demo',fail)
+    data=pipeline._safe_demo(NOW,'reason',resolve_window(NOW,None,None),odds_remaining=7)
+    assert data.mode=='demo' and data.matches==[] and data.odds_requests_remaining==7
+
+
+def test_database_and_collection_failures_fallback(tmp_path,monkeypatch):
+    import sqlite3
+    from valuepulse import pipeline
+    original=pipeline.connect
+    def fail(*args,**kwargs): raise sqlite3.OperationalError('database is locked')
+    monkeypatch.setattr(pipeline,'connect',fail)
+    assert run(Settings('fd','odds',tmp_path/'db'),client=FakeClient(),now=NOW).mode=='demo'
+    monkeypatch.setattr(pipeline,'connect',original)
+    monkeypatch.setattr(pipeline,'_collect',fail)
+    assert run(Settings('fd','odds',tmp_path/'db'),client=FakeClient(),now=NOW).mode=='demo'
+
+
+def test_prematch_filter_excludes_started_games():
+    from valuepulse.pipeline import _evaluate
+    from valuepulse.models import Fixture, Quote
+    from valuepulse.window import resolve_window
+    kickoff=NOW-timedelta(hours=1)
+    fixture=Fixture('Liga','XX',kickoff,'Arsenal','Chelsea','event')
+    quote=Quote('Liga',kickoff,'Arsenal','Chelsea','Book',3.,3.5,4.,NOW,'cache')
+    assert not _evaluate([fixture],[],[quote],NOW,resolve_window(NOW,None,None),api_limited=False,is_demo=False)
+
+
+def test_saisonwechsel_blockiert_frisch_abgerufene_alte_tabelle():
+    from valuepulse.pipeline import _season_covers, _standings_fresh
+    rows=[Standing('PL','Arsenal',20,50,40,10,updated_at=NOW,season='2025-07-01',season_end='2026-06-30')]
+    assert not _standings_fresh(rows,NOW)
+    assert not _season_covers(rows,NOW.date())
+    rows[0].season='2026-07-01'; rows[0].season_end='2027-06-30'
+    assert _standings_fresh(rows,NOW)

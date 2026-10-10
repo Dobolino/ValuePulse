@@ -25,6 +25,8 @@ class Standing:
     goals_for: int
     goals_against: int
     updated_at: datetime | None = None
+    season: str = ""
+    season_end: str = ""
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ class BookLine:
     home: float
     draw: float
     away: float
+    last_update: datetime | None = None
+    source: str = "unknown"
 
 
 @dataclass
@@ -68,6 +72,11 @@ class Assessment:
     home_xg: float | None = None
     away_xg: float | None = None
     used_table: bool = False
+    is_demo: bool = False
+    api_limited: bool = False
+    stale_table: bool = False
+    probability_gap: float = 0.0
+    book_odds: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 @dataclass

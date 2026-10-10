@@ -8,6 +8,7 @@ dann über Speicher oder Demo-Modus.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Protocol
 
 import requests
@@ -150,6 +151,8 @@ def fetch_standings(client: HttpClient, api_key: str, league: dict) -> tuple[lis
                     points=int(item.get("points") or 0),
                     goals_for=int(item.get("goalsFor") or 0),
                     goals_against=int(item.get("goalsAgainst") or 0),
+                    season=str((payload.get("season") or {}).get("startDate") or ""),
+                    season_end=str((payload.get("season") or {}).get("endDate") or ""),
                 )
             )
         except (TypeError, ValueError):
@@ -313,7 +316,7 @@ def _quote_from_book(
             price = float(outcome.get("price"))
         except (TypeError, ValueError):
             continue
-        if price <= 1.01:
+        if not math.isfinite(price) or price <= 1.01:
             continue
         slot = _slot(name, home, away)
         if slot is None:
@@ -325,7 +328,7 @@ def _quote_from_book(
         prices["draw"] = unnamed[0]
     if any(value is None for value in prices.values()):
         return None
-    last_update = parse_dt(book.get("last_update")) or fetched_at
+    last_update = parse_dt(book.get("last_update"))
     return Quote(
         competition=competition,
         kickoff=kickoff,
