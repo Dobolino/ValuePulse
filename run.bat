@@ -43,9 +43,8 @@ if not exist ".env" if exist ".env.example" (
 
 ".venv\Scripts\python.exe" -c "import socket; socket.create_connection(('127.0.0.1',8501),1)" >nul 2>&1
 if not errorlevel 1 (
-  start "" http://localhost:8501
-  echo ValuePulse laeuft bereits. Das Dashboard oeffnet sich im Darkmode.
-  exit /b 0
+  echo Ein aelteres ValuePulse auf Port 8501 wird beendet, damit die neuen Dateien geladen werden.
+  for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8501" ^| findstr "ABH"') do taskkill /F /PID %%P >nul 2>&1
 )
 
 start "ValuePulse" /MIN ".venv\Scripts\python.exe" -m streamlit run valuepulse/app.py --server.port 8501 --server.headless true --theme.base dark --browser.gatherUsageStats false

@@ -58,11 +58,36 @@ open_browser() {
   fi
 }
 
-if port_open; then
-  echo "ValuePulse läuft bereits. Das Dashboard öffnet sich im Darkmode."
-  open_browser
-  exit 0
-fi
+stop_previous() {
+  # Ein altes Fenster auf Port 8501 zeigt sonst weiter den vorigen Fehler,
+  # auch wenn der Ordner gerade neu entpackt wurde.
+  if [ -f .valuepulse.pid ]; then
+    old="$(cat .valuepulse.pid 2>/dev/null || true)"
+    if [ -n "${old}" ]; then
+      kill "${old}" >/dev/null 2>&1 || true
+    fi
+    rm -f .valuepulse.pid
+  fi
+  if ! port_open; then
+    return 0
+  fi
+  echo "Ein älteres ValuePulse auf Port 8501 wird beendet, damit die neuen Dateien geladen werden."
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -ti tcp:8501 2>/dev/null || true)"
+    if [ -n "${pids}" ]; then
+      # shellcheck disable=SC2086
+      kill ${pids} >/dev/null 2>&1 || true
+      sleep 1
+      if port_open; then
+        # shellcheck disable=SC2086
+        kill -9 ${pids} >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+}
+
+find valuepulse -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+stop_previous
 
 nohup python -m streamlit run valuepulse/app.py \
   --server.port 8501 \
