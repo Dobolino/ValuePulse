@@ -54,6 +54,20 @@ apply_zip() {
     -cf - . | tar -C "$dest" -xf -
 }
 
+grant_execute() {
+  # macOS entfernt beim Entpacken oft das Ausführungsrecht. Ohne dieses Recht
+  # meldet der Doppelklick: nicht die notwendigen Zugriffsrechte.
+  local name
+  for name in run.sh update.sh run.command update.command; do
+    if [ -f "$name" ]; then
+      chmod +x "$name"
+      if command -v xattr >/dev/null 2>&1; then
+        xattr -d com.apple.quarantine "$name" 2>/dev/null || true
+      fi
+    fi
+  done
+}
+
 if [ -e .git ] && command -v git >/dev/null 2>&1; then
   if ! git fetch origin main; then
     echo "Die Hauptversion main konnte nicht vom Server geholt werden."
@@ -88,6 +102,8 @@ else
     exit 1
   fi
 fi
+
+grant_execute
 
 if [ "${VALUEPULSE_UPDATE_FILES_ONLY:-}" = "1" ]; then
   echo "ValuePulse wurde erfolgreich aktualisiert!"

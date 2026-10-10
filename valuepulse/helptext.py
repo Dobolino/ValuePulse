@@ -96,7 +96,9 @@ Beispiel: *Modell sieht Heimsieg bei 55 %, Quote 2,00 → 10,0 % EV (0,55 × 2,0
 
 Neue Programmdateien holst du mit einem Doppelklick auf **update.bat** (Windows)
 oder **update.command** (Mac). Im Terminal geht `./update.sh` (Mac und Linux).
-Falls macOS **update.command** blockiert: Rechtsklick, dann **Öffnen**, dann noch einmal **Öffnen**.
+Meldet macOS fehlende Zugriffsrechte, im Terminal im ValuePulse-Ordner einmal
+`chmod +x update.command update.sh run.command run.sh` ausführen und danach erneut doppelklicken.
+Warnt macOS vor einem unbestätigten Entwickler: Rechtsklick, dann **Öffnen**, dann noch einmal **Öffnen**.
 Dabei wird immer die Hauptversion **main** geholt.
 Ein als ZIP gespeicherter Ordner ohne Git funktioniert trotzdem:
 die Dateien werden direkt geladen. Die Schlüssel in `.env` und die Datei

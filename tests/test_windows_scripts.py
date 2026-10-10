@@ -96,6 +96,9 @@ def test_update_sh_zip_behaelt_env_und_datenbank(tmp_path: Path):
     packed = tmp_path / "packed" / "ValuePulse-main"
     (packed / "valuepulse").mkdir(parents=True)
     (packed / "run.bat").write_text("neu\n", encoding="utf-8")
+    command = packed / "update.command"
+    command.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    command.chmod(0o644)
     (packed / "valuepulse" / "app.py").write_text("print('neu')\n", encoding="utf-8")
     (packed / ".env").write_text("ODDS_API_KEY=aus-dem-zip\n", encoding="utf-8")
     (packed / "valuepulse.sqlite3").write_bytes(b"zip-datenbank")
@@ -125,5 +128,6 @@ def test_update_sh_zip_behaelt_env_und_datenbank(tmp_path: Path):
     assert (project / ".env").read_text(encoding="utf-8") == "ODDS_API_KEY=geheim\n"
     assert (project / "valuepulse.sqlite3").read_bytes() == b"alte-datenbank"
     assert (project / "run.bat").read_text(encoding="utf-8") == "neu\n"
+    assert (project / "update.command").stat().st_mode & stat.S_IXUSR
     assert (project / "valuepulse" / "app.py").read_text(encoding="utf-8") == "print('neu')\n"
     assert (project / ".venv" / "marker").read_text(encoding="utf-8") == "bleiben"
