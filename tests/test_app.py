@@ -28,6 +28,7 @@ def test_navigation_and_calendar_do_not_fetch_again(tmp_path,monkeypatch):
     assert not app.exception and len(calls)==1
     app.button(key='nav-calendar').click().run()
     assert not app.exception and len(calls)==1
+    assert any('Gewählter Zeitraum' in item.value for item in app.markdown)
     next(button for button in app.button if button.key and button.key.startswith('day-')).click().run()
     assert not app.exception and len(calls)==1
     app.button(key='nav-analysis').click().run()
@@ -49,6 +50,7 @@ def test_slip_rechecks_quotes_and_saves_separate_paper_position(tmp_path,monkeyp
     assert not app.exception
     next(button for button in app.button if button.label=='Quoten prüfen & Tippschein generieren').click().run()
     assert not app.exception and len(calls)==2
+    assert any('Anpfiff' in item.value and 'morgen' in item.value for item in app.markdown)
     next(button for button in app.button if button.label=='Schein im gewählten Positionsbuch speichern').click().run()
     assert not app.exception and not app.error
     app.button(key='nav-positions').click().run()
@@ -56,6 +58,10 @@ def test_slip_rechecks_quotes_and_saves_separate_paper_position(tmp_path,monkeyp
     assert next(metric for metric in app.metric if metric.label=='Aktive Positionen').value=='1'
     app.selectbox(key='book_mode').select('real').run()
     assert not app.exception
+    assert next(metric for metric in app.metric if metric.label=='Aktive Positionen').value=='0'
+    app.selectbox(key='book_mode').select('paper').run()
+    app.button(key='position-delete').click().run()
+    assert not app.exception and not app.error
     assert next(metric for metric in app.metric if metric.label=='Aktive Positionen').value=='0'
 
 

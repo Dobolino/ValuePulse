@@ -43,6 +43,7 @@ def test_kombi_und_kelly_cap():
     assert slip.combined_probability==pytest.approx(.42)
     assert slip.stake==.01 and slip.stake_capped
     assert 'Unabhängigkeit' in slip.copy_text
+    assert 'Anpfiff morgen' in slip.copy_text
 
 
 def test_negative_ev_nach_buchmacherwechsel_ist_verboten():

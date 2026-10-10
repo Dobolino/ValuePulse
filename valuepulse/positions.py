@@ -162,6 +162,17 @@ def settle(conn: sqlite3.Connection, position_id: int, status: str) -> None:
         conn.execute("UPDATE positions SET status = ?, pnl = ? WHERE id = ?", (status, pnl, position_id))
 
 
+def delete_position(conn: sqlite3.Connection, position_id: int) -> None:
+    """Entfernt einen Eintrag und seine Änderungshistorie aus dem Positionsbuch."""
+    ensure_positions(conn)
+    row = conn.execute("SELECT id FROM positions WHERE id = ?", (position_id,)).fetchone()
+    if row is None:
+        raise ValueError("Diese Position gibt es nicht.")
+    with conn:
+        conn.execute("DELETE FROM position_changes WHERE position_id = ?", (position_id,))
+        conn.execute("DELETE FROM positions WHERE id = ?", (position_id,))
+
+
 def list_positions(conn: sqlite3.Connection, mode: str | None = None) -> list[Position]:
     ensure_positions(conn)
     if mode is None:

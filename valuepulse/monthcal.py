@@ -49,6 +49,13 @@ def value_counts(matches: list[MatchView], year: int, month: int) -> dict[date, 
     return counts
 
 
+def in_selected_range(day: date, start: date, end: date) -> bool:
+    """True, wenn der Tag im gewählten Zeitraum liegt, inklusive der Ränder."""
+    if end < start:
+        start, end = end, start
+    return start <= day <= end
+
+
 def shift_month(year: int, month: int, step: int) -> tuple[int, int]:
     index = year * 12 + (month - 1) + step
     return index // 12, index % 12 + 1

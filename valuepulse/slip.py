@@ -206,8 +206,8 @@ def copy_text(slip: Slip) -> str:
         return "\n".join(lines)
     for index, leg in enumerate(slip.legs, start=1):
         lines.append(
-            f"{index}. {leg.competition}: {leg.home} – {leg.away} | {leg.pick_label} | "
-            f"Quote {_decimal(leg.odds)} | Modell {_percent(leg.probability)}"
+            f"{index}. {leg.competition}: {leg.home} – {leg.away} | Anpfiff {leg.kickoff_label} | "
+            f"{leg.pick_label} | Quote {_decimal(leg.odds)} | Modell {_percent(leg.probability)}"
         )
     lines.append(f"Gesamtquote: {_decimal(slip.combined_odds or 0.0)}")
     lines.append(f"Modellchance (Unabhängigkeit angenommen): {_percent(slip.combined_probability or 0.0)}")

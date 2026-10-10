@@ -54,7 +54,9 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
   Fehlen Spiele, erscheint **Spielschein gekürzt**.
 - **Positionen:** gespeicherte Tipps, Gewinn und Verlust, Gewinnrate und ROI.
   Nach dem Spiel trägst du Gewonnen, Verloren oder Storniert ein.
-- **Kalender:** Monatsansicht. Ein Tag setzt nur den Zeitraum.
+  **Tippschein löschen** entfernt einen Eintrag aus dem gewählten Buch.
+- **Kalender:** Monatsansicht. Ein Tag setzt nur den Zeitraum, der im Monat
+  markiert und als **Gewählter Zeitraum** angezeigt wird.
   Erst **Spiele für gewählten Zeitraum berechnen** startet die Analyse.
   Liegt in dem Zeitraum kein Spiel, zeigt das Dashboard die nächsten
   Spiele, die The Odds API geliefert hat, und speichert die Quoten.

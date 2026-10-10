@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from valuepulse.models import Assessment, MatchView
-from valuepulse.monthcal import apply_day_click, month_weeks, shift_month, value_counts
+from valuepulse.monthcal import apply_day_click, in_selected_range, month_weeks, shift_month, value_counts
 from valuepulse.sports import SPORTS, provider_plan
 
 
@@ -36,6 +36,16 @@ def test_tagesklick_setzt_nur_den_zeitraum():
     start, end, phase = apply_day_click(start, "end", date(2026, 9, 20))
     assert start == date(2026, 9, 20)
     assert end == date(2026, 9, 24)
+
+
+def test_zeitraum_markiert_inklusive_raender():
+    start, end = date(2026, 10, 10), date(2026, 10, 17)
+    assert in_selected_range(start, start, end)
+    assert in_selected_range(end, start, end)
+    assert in_selected_range(date(2026, 10, 12), start, end)
+    assert not in_selected_range(date(2026, 10, 9), start, end)
+    assert not in_selected_range(date(2026, 10, 18), start, end)
+    assert in_selected_range(date(2026, 10, 12), end, start)
 
 
 def test_kalender_zaehlt_nur_value_signale_im_monat():

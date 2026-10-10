@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from valuepulse.db import connect
-from valuepulse.positions import add_position, list_positions, settle, summarize
+from valuepulse.positions import add_position, delete_position, list_positions, settle, summarize
 
 
 def test_position_bilanz_aus_gewonnen_verloren_offen(tmp_path):
@@ -54,6 +56,28 @@ def test_position_bilanz_aus_gewonnen_verloren_offen(tmp_path):
     assert summary.win_rate == 0.5
     assert summary.roi == (2.0 - 4.0) / 6.0
     assert any(row.status == "open" and row.pnl is None for row in rows)
+
+
+def test_loeschen_entfernt_eintrag_und_historie(tmp_path):
+    conn = connect(tmp_path / "valuepulse.sqlite3")
+    position_id = add_position(
+        conn,
+        sport="football",
+        competition="Kombischein",
+        match_label="Nordstern – Westbrück",
+        kickoff="2026-10-11T15:30:00+00:00",
+        pick_label="Kombischein",
+        odds=3.2,
+        probability=0.4,
+        stake=1.0,
+    )
+    settle(conn, position_id, "won")
+    delete_position(conn, position_id)
+    assert list_positions(conn) == []
+    remaining = conn.execute("SELECT COUNT(*) AS n FROM position_changes").fetchone()["n"]
+    assert remaining == 0
+    with pytest.raises(ValueError, match="gibt es nicht"):
+        delete_position(conn, position_id)
 
 
 def test_storno_zahlt_null_und_zaehlt_nicht_zur_quote(tmp_path):

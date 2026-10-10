@@ -11,6 +11,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from datetime import date, timedelta, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -20,9 +21,17 @@ from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
 from valuepulse.models import DashboardData, MatchView
-from valuepulse.monthcal import apply_day_click, month_weeks, shift_month, value_counts
+from valuepulse.monthcal import apply_day_click, in_selected_range, month_weeks, shift_month, value_counts
 from valuepulse.pipeline import run
-from valuepulse.positions import STATUS_LABELS, add_position, list_positions, settle, summarize, exposure_by_team
+from valuepulse.positions import (
+    STATUS_LABELS,
+    add_position,
+    delete_position,
+    exposure_by_team,
+    list_positions,
+    settle,
+    summarize,
+)
 from valuepulse.history import event_key
 from valuepulse.analytics_ui import render_analysis, render_quote_history
 from valuepulse.pro import build_pro_view
@@ -233,6 +242,36 @@ _CSS = """
         margin: 0.2rem 0 1rem;
     }
     .vp-slip-warn strong { color: #ffe7a3; display: block; margin-bottom: 0.25rem; }
+    .vp-cal-month {
+        text-align: center;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.3;
+        margin: 0.35rem 0;
+        color: #f4f7fb;
+    }
+    .vp-cal-head {
+        text-align: center;
+        color: #b7c6d6;
+        font-weight: 700;
+        margin: 0.2rem 0 0.35rem;
+    }
+    .vp-cal-count {
+        text-align: center;
+        color: #8ef0b5;
+        font-size: 0.78rem;
+        line-height: 1.2;
+        min-height: 1rem;
+        margin: 0.1rem 0 0.55rem;
+    }
+    [class*="st-key-day-"] button,
+    [class*="st-key-day-"] [data-testid^="stBaseButton"] {
+        width: 100% !important;
+        min-height: 2.8rem;
+        border-radius: 12px;
+        font-weight: 700;
+        justify-content: center !important;
+    }
 </style>
 """
 
@@ -440,7 +479,8 @@ def _render_calendar(data: DashboardData) -> None:
     st.markdown(
         '<p class="vp-note">Ein Klick auf einen Tag setzt nur den Zeitraum. '
         "Die Analyse startet erst mit <b>Spiele für gewählten Zeitraum berechnen</b>. "
-        "Grüne Zahlen sind Value-Signale im zuletzt berechneten Fenster.</p>",
+        "Markierte Tage sind der gewählte Zeitraum. "
+        "Grüne Zahlen darunter sind Value-Signale im zuletzt berechneten Fenster.</p>",
         unsafe_allow_html=True,
     )
     year = int(st.session_state.cal_year)
@@ -452,17 +492,26 @@ def _render_calendar(data: DashboardData) -> None:
             st.rerun()
     with title_col:
         st.markdown(
-            f'<p class="vp-page-title">{html.escape(calendar_title(year, month))}</p>',
+            f'<p class="vp-cal-month">{html.escape(calendar_title(year, month))}</p>',
             unsafe_allow_html=True,
         )
     with next_col:
         if st.button("→", key="cal-next"):
             st.session_state.cal_year, st.session_state.cal_month = shift_month(year, month, 1)
             st.rerun()
+    st.markdown(
+        f'<p class="vp-note"><b>Gewählter Zeitraum:</b> {html.escape(_picked_label())}</p>',
+        unsafe_allow_html=True,
+    )
     counts = value_counts(data.matches, year, month)
     weekday_row = st.columns(7)
     for index, name in enumerate(("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")):
-        weekday_row[index].caption(name)
+        weekday_row[index].markdown(
+            f'<p class="vp-cal-head">{name}</p>',
+            unsafe_allow_html=True,
+        )
+    pick_start = st.session_state.pick_start
+    pick_end = st.session_state.pick_end
     for week in month_weeks(year, month):
         cells = st.columns(7)
         for index, day in enumerate(week):
@@ -470,9 +519,12 @@ def _render_calendar(data: DashboardData) -> None:
                 if day is None:
                     st.write("")
                     continue
-                mark = counts.get(day, 0)
-                label = str(day.day) if mark == 0 else f"{day.day} · {mark}"
-                if st.button(label, key=f"day-{day.isoformat()}"):
+                selected = in_selected_range(day, pick_start, pick_end)
+                if st.button(
+                    str(day.day),
+                    key=f"day-{day.isoformat()}",
+                    type="primary" if selected else "secondary",
+                ):
                     start, end, phase = apply_day_click(
                         st.session_state.get("pick_start"),
                         str(st.session_state.get("range_phase", "start")),
@@ -482,6 +534,11 @@ def _render_calendar(data: DashboardData) -> None:
                     st.session_state.pick_end = end
                     st.session_state.range_phase = phase
                     st.rerun()
+                mark = counts.get(day, 0)
+                st.markdown(
+                    f'<p class="vp-cal-count">{mark if mark else "&nbsp;"}</p>',
+                    unsafe_allow_html=True,
+                )
     start_col, end_col = st.columns(2)
     with start_col:
         st.date_input("Startdatum", key="pick_start", format="DD.MM.YYYY")
@@ -568,7 +625,8 @@ def _render_positions() -> None:
     _page_title("Positionen")
     st.markdown(
         '<p class="vp-note">Hier siehst du, ob die gespeicherten Tipps aufgegangen sind. '
-        "Neue Tipps kommen über den Button am Spiel im Dashboard.</p>",
+        "Einzelne Tipps kommen über das Dashboard, Kombi-Scheine über Strategie &amp; Tippschein. "
+        "Einen Eintrag kannst du unten löschen.</p>",
         unsafe_allow_html=True,
     )
     settings = load_settings()
@@ -611,9 +669,22 @@ def _render_positions() -> None:
         if not rows:
             st.info("Noch keine Position. Im Dashboard bei einem Spiel auf „Tipp zu Positionen hinzufügen“ klicken.")
         else:
+            delete_labels = [f"#{row.id} {row.match_label} · {row.pick_label}" for row in rows]
+            chosen = st.selectbox(
+                "Gespeicherten Schein entfernen",
+                delete_labels,
+                key="position-delete-choice",
+            )
+            st.caption(
+                "Der Eintrag verschwindet aus diesem Positionsbuch, auch wenn er schon abgerechnet ist."
+            )
+            if st.button("Tippschein löschen", key="position-delete"):
+                delete_position(conn, rows[delete_labels.index(chosen)].id)
+                st.rerun()
             table = [
                 {
                     "Datum": row.created_at[:10],
+                    "Anpfiff": _kickoff_text(row.kickoff),
                     "Sportart": _sport_name(row.sport),
                     "Liga": row.competition,
                     "Match": row.match_label,
@@ -746,6 +817,7 @@ def _show_slip(slip: Slip) -> None:
         {
             "Liga": leg.competition,
             "Paarung": f"{leg.home} – {leg.away}",
+            "Anpfiff": leg.kickoff_label,
             "Tipp": leg.pick_label,
             "Einzelquote": decimal_de(leg.odds),
             "Modell": pct(leg.probability, 1),
@@ -849,6 +921,28 @@ def _period_label() -> str:
     start = st.session_state.search_from.strftime("%d.%m.%Y")
     end = st.session_state.search_to.strftime("%d.%m.%Y")
     return f"{start} bis {end}"
+
+
+def _picked_label() -> str:
+    start = st.session_state.pick_start
+    end = st.session_state.pick_end
+    if end < start:
+        start, end = end, start
+    if start == end:
+        return start.strftime("%d.%m.%Y")
+    return f"{start.strftime('%d.%m.%Y')} bis {end.strftime('%d.%m.%Y')}"
+
+
+def _kickoff_text(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y, %H:%M Uhr")
 
 
 def _banner(data: DashboardData) -> None:
