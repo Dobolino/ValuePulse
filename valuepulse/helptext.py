@@ -44,7 +44,8 @@ Im Ordner von ValuePulse im Terminal: `./run.sh`
 - **Dashboard:** die Ampel und die Begründung zu jedem Spiel.
   Bei einem Signal kannst du **+ Tipp zu Positionen hinzufügen**.
 - **Sportarten:** Fußball ist aktiv. Dazu die Premier League, Bundesliga,
-  La Liga, Serie A, Ligue 1, Weltmeisterschaft, Europameisterschaft,
+  La Liga, Serie A, Ligue 1, Champions League, Europa League,
+  Conference League, Weltmeisterschaft, Europameisterschaft,
   Nations League, WM-Qualifikation und EM-Qualifikation.
   Tennis, Basketball, Baseball, UFC, American Football und Darts sind
   vorbereitet und noch ohne eigene Spiele. Esports ist nicht enthalten.

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from valuepulse.config import LOOKAHEAD_DAYS, MODEL_VERSION, QUOTE_CONFIRM_MINUTES, load_settings, masked_key, save_env_keys
+from valuepulse.config import LEAGUES, LOOKAHEAD_DAYS, MODEL_VERSION, QUOTE_CONFIRM_MINUTES, load_settings, masked_key, save_env_keys
 from valuepulse.db import connect
 from valuepulse.helptext import HELP_MARKDOWN
 from valuepulse.model import OUTCOME_LABELS, decimal_de, pct
@@ -474,6 +474,7 @@ def _sidebar() -> None:
                 st.session_state.sport = sport.id
                 st.session_state.page = "dashboard"
                 st.rerun()
+        st.caption("Fußball-Wettbewerbe: " + ", ".join(league["name"] for league in LEAGUES) + ".")
     _nav("strategy", "📈 Strategie & Tippschein")
     _nav("positions", "💼 Positionen")
     _nav("analysis", "📉 Prognosen & Backtest")

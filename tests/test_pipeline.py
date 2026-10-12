@@ -335,10 +335,16 @@ def test_ohne_zuordnung_faellt_auf_demo_zurueck(tmp_path):
 
 def test_ligen_sind_die_grossen_fuenf():
     codes = set(league_by_code())
-    assert {"PL", "BL1", "PD", "SA", "FL1", "WC", "EC", "UNL", "QUFA", "ECQ"} <= codes
+    assert {"PL", "BL1", "PD", "SA", "FL1", "CL", "EL", "UCL", "WC", "EC", "UNL", "QUFA", "ECQ"} <= codes
     assert league_by_code()["UNL"]["name"] == "Nations League"
     assert league_by_code()["WC"]["sport"] == "soccer_fifa_world_cup"
     assert league_by_code()["ECQ"]["name"] == "EM-Qualifikation"
+    assert league_by_code()["CL"]["sport"] == "soccer_uefa_champs_league"
+    assert league_by_code()["EL"]["sport"] == "soccer_uefa_europa_league"
+    assert league_by_code()["UCL"]["sport"] == "soccer_uefa_europa_conference_league"
+    assert league_by_code()["CL"]["fixtures"] is False
+    assert league_by_code()["EL"]["fixtures"] is False
+    assert league_by_code()["UCL"]["fixtures"] is False
 
 
 def test_nations_league_wird_neben_den_ligen_gezeigt(tmp_path):
@@ -389,6 +395,61 @@ def test_nations_league_wird_neben_den_ligen_gezeigt(tmp_path):
     assert nations_match.competition == "Nations League"
     assert "Weltmeisterschaft" not in data.banner
     assert not any("Weltmeisterschaft" in note for note in data.warnings)
+
+
+def test_champions_und_europa_league_kommen_aus_den_quoten(tmp_path):
+    kickoff = (NOW + timedelta(days=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def event(event_id: str, home: str, away: str) -> dict:
+        return {
+            "id": event_id,
+            "commence_time": kickoff,
+            "home_team": home,
+            "away_team": away,
+            "bookmakers": [
+                {
+                    "key": "pinnacle",
+                    "title": "Pinnacle",
+                    "last_update": NOW.isoformat().replace("+00:00", "Z"),
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": home, "price": 2.10},
+                                {"name": "Draw", "price": 3.40},
+                                {"name": away, "price": 3.50},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    class CupClient(FakeClient):
+        def get(self, url, *, headers, params, timeout):
+            if "/odds" in url and "europa_conference" in url:
+                self.calls += 1
+                self.params.append(params)
+                self.urls.append(url)
+                return FakeResponse({"message": "Unknown sport"}, status=404)
+            if "/odds" in url and "champs_league" in url:
+                self.odds = [event("cl", "Real Madrid", "Bayern Munich")]
+            elif "/odds" in url and "europa_league" in url:
+                self.odds = [event("el", "AS Roma", "Ajax")]
+            elif "/odds" in url:
+                self.odds = _odds_payload()
+            return super().get(url, headers=headers, params=params, timeout=timeout)
+
+    client = CupClient()
+    data = run(Settings("fd-key", "odds-key", tmp_path / "valuepulse.sqlite3"), client=client, now=NOW)
+    champions = next(match for match in data.matches if match.home == "Real Madrid")
+    europa = next(match for match in data.matches if match.home == "AS Roma")
+    assert champions.away == "Bayern Munich"
+    assert champions.competition == "Champions League"
+    assert europa.away == "Ajax"
+    assert europa.competition == "Europa League"
+    assert not any("Conference League" in note for note in data.warnings)
+    assert not any("/competitions/CL/" in url or "/competitions/EL/" in url or "/competitions/UCL/" in url for url in client.urls)
 
 
 def test_frische_tabelle_wird_nicht_erneut_geholt(tmp_path):
